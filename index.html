@@ -25,6 +25,7 @@
         let pc
         let ws
         let roomId
+        let isNegotiating = false;
 
         pc = new RTCPeerConnection()
 
@@ -51,18 +52,33 @@
 
         pc.onnegotiationneeded = async () => {
             try {
-                // If the browser is the one adding tracks, it should usually 
-                // create the Offer and send it to the server.
+                // 1. Guard against concurrent negotiations (Prevents InvalidModificationError)
+                if (isNegotiating || pc.signalingState !== "stable") {
+                    return;
+                }
+
+                isNegotiating = true;
+                console.log("Negotiation needed: Creating offer...");
+
+                // 2. Create the offer
                 const offer = await pc.createOffer();
+
+                // 3. Double-check state before setting local description
+                if (pc.signalingState !== "stable") return;
+
                 await pc.setLocalDescription(offer);
 
+                // 4. Send to SFU
                 ws.send(JSON.stringify({
-                    type: "offer", // Tell the server to handle this new offer
-                    data: JSON.stringify(offer),
+                    type: "offer",
+                    data: JSON.stringify(pc.localDescription), // Use pc.localDescription for accuracy
                     roomId: roomId
                 }));
+
             } catch (err) {
                 console.error("Negotiation failed:", err);
+            } finally {
+                isNegotiating = false;
             }
         };
 
@@ -132,6 +148,10 @@
 
             if (msg.type === "candidate") {
                 pc.addIceCandidate(JSON.parse(msg.data))
+            }
+
+            if (msg.type === "answer") {
+                pc.setRemoteDescription(JSON.parse(msg.data))
             }
         }
     </script>

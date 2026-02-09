@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
@@ -29,20 +30,44 @@ type controller struct {
 	logger *zap.Logger
 
 	roomRepo repository.RoomRepo
+	api      *webrtc.API
 }
 
 func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller {
-	return &controller{
+	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetAnsweringDTLSRole(webrtc.DTLSRoleServer)
+	mediaEngine := &webrtc.MediaEngine{}
+	mediaEngine.RegisterDefaultCodecs()
+	api := webrtc.NewAPI(
+		webrtc.WithMediaEngine(mediaEngine),
+		webrtc.WithSettingEngine(settingEngine),
+	)
+
+	ctrl := &controller{
+		api:      api,
 		logger:   logger,
 		roomRepo: roomRepo,
 	}
+
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		for _ = range ticker.C {
+			roomIds := ctrl.roomRepo.GetRooms()
+			for _, roomId := range roomIds {
+				ctrl.dispatch(roomId)
+			}
+		}
+	}()
+
+	return ctrl
 }
 
 func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
-	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	peerConnection, err := ctrl.api.NewPeerConnection(webrtc.Configuration{})
 
 	if err != nil {
 		ctrl.logger.Error("failed to create PeerConnection", zap.Error(err))
+		return
 	}
 
 	defer peerConnection.Close()
@@ -76,33 +101,40 @@ func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
 			answer := webrtc.SessionDescription{}
 			if err := json.Unmarshal([]byte(msg.Data), &answer); err != nil {
 				ctrl.logger.Error("failed to unmarshal answer", zap.Error(err))
+				continue
 			}
 
 			if err := peer.PeerConnection.SetRemoteDescription(answer); err != nil {
 				ctrl.logger.Error("failed to set remote description", zap.Error(err))
+				continue
 			}
 		case "offer":
 			offer := webrtc.SessionDescription{}
 			if err := json.Unmarshal([]byte(msg.Data), &offer); err != nil {
 				ctrl.logger.Error("failed to unmarshal offer", zap.Error(err))
+				continue
 			}
 
 			if err := peer.PeerConnection.SetRemoteDescription(offer); err != nil {
 				ctrl.logger.Error("failed to set remote description", zap.Error(err))
+				continue
 			}
 
 			answer, err := peer.PeerConnection.CreateAnswer(nil)
 			if err != nil {
 				ctrl.logger.Error("failed to create answer", zap.Error(err))
+				continue
 			}
 
 			if err := peer.PeerConnection.SetLocalDescription(answer); err != nil {
 				ctrl.logger.Error("failed to set local description", zap.Error(err))
+				continue
 			}
 
 			answerString, err := json.Marshal(answer)
 			if err != nil {
 				ctrl.logger.Error("failed to marshal answer", zap.Error(err))
+				continue
 			}
 
 			if err := peer.SendMsg(&Msg{
@@ -116,7 +148,7 @@ func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
 			if err := json.Unmarshal([]byte(msg.Data), &candidate); err != nil {
 				ctrl.logger.Error("failed to unmarshal candidate", zap.Error(err))
 
-				return
+				continue
 			}
 
 			ctrl.logger.Info("received candidate", zap.Any("candidate", candidate))
@@ -124,7 +156,7 @@ func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
 			if err := peerConnection.AddICECandidate(candidate); err != nil {
 				ctrl.logger.Error("failed to add candidate", zap.Error(err))
 
-				return
+				continue
 			}
 		}
 	}
@@ -229,6 +261,8 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 		ctrl.roomRepo.AddTrack(peer.Id, trackLocal, msg.RoomId)
 		defer ctrl.roomRepo.RemoveTrack(trackLocal, msg.RoomId)
 
+		go ctrl.signalRoom(peer, msg.RoomId)
+
 		buf := make([]byte, 1500)
 		rtpPkt := &rtp.Packet{}
 
@@ -261,6 +295,9 @@ func (ctrl *controller) onICEConnectionStateChange() func(is webrtc.ICEConnectio
 }
 
 func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
+	ctrl.roomRepo.LockRoom(room)
+	defer ctrl.roomRepo.UnlockRoom(room)
+
 	defer ctrl.dispatch(room)
 
 	peers := ctrl.roomRepo.GetPeers(room)
@@ -275,7 +312,7 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			existingPeer[sender.Track().ID()] = true
 		}
 
-		for _, reciever := range peer.PeerConnection.GetReceivers() {
+		for _, reciever := range p.PeerConnection.GetReceivers() {
 			if reciever.Track() == nil {
 				continue
 			}
@@ -286,7 +323,7 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 		for _, track := range ctrl.roomRepo.GetTracks(room) {
 			if _, ok := existingPeer[track.Track.ID()]; !ok {
 				// Don't send track to self
-				if track.PeerId == peer.Id {
+				if track.PeerId == p.Id {
 					continue
 				}
 
@@ -299,18 +336,21 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 		offer, err := p.PeerConnection.CreateOffer(nil)
 		if err != nil {
 			ctrl.logger.Error("failed to create offer", zap.Error(err))
+			continue
 		}
 
 		if err := p.PeerConnection.SetLocalDescription(offer); err != nil {
 			ctrl.logger.Error("failed to set local description", zap.Error(err))
+			continue
 		}
 
 		offerString, err := json.Marshal(offer)
 		if err != nil {
 			ctrl.logger.Error("failed to marshal offer", zap.Error(err))
+			continue
 		}
 
-		if writeErr := peer.SendMsg(&Msg{
+		if writeErr := p.SendMsg(&Msg{
 			Type:   "offer",
 			Data:   string(offerString),
 			RoomId: room,
