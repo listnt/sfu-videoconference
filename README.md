@@ -1,6 +1,6 @@
 # videoconference
 
-WebRTC SFU: WebSocket signaling, rooms, track fan-out. Server creates offers when peers join; new peer answers; answers are routed back to the correct offerer.
+WebRTC SFU: WebSocket signaling, rooms, track fan-out. When peers join a room, the server creates offers (e.g. to add new tracks) and sends them to clients; each client answers on its own connection and the server applies the answer to that peer’s connection.
 
 **Run**
 
@@ -16,13 +16,13 @@ Open `index.html` (as file or via any static server). Enter a room ID, click Con
 
 **WebSocket messages** (JSON)
 
-| Type      | Direction | Notes |
-|-----------|-----------|--------|
-| `join`    | client→server | `roomId` required |
-| `leave`   | client→server | |
-| `offer`   | server→client | Server sends; includes `offererId` |
-| `answer`  | client→server | Client should send `offererId` from offer |
-| `candidate` | both | ICE candidates |
+| Type        | Direction     | Notes |
+|-------------|---------------|--------|
+| `join`      | client→server | `roomId` required |
+| `leave`     | client→server | (handled; leave logic not fully implemented) |
+| `offer`     | server→client | Server sends; payload in `data`, `roomId` set |
+| `answer`    | client→server | Payload in `data`; server associates by connection |
+| `candidate` | both          | ICE candidates; payload in `data` |
 
 **Layout**
 
