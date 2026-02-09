@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>WebRTC File Sender</title>
+</head>
+
+<body>
+
+    <input type="text" id="roomId" placeholder="Room ID">
+    <button id="connect">Connect</button>
+    <br><br>
+
+    <input type="file" id="videoFile" accept="video/*">
+    <button id="start">Start Video</button>
+
+    <h3>Local Video</h3>
+    <video id="localVideo" width="320" height="240" autoplay muted playsinline></video>
+
+    <h3>Remote Video</h3>
+    <div id="remoteVideos"></div>
+
+    <script>
+        let pc
+        let ws
+        let roomId
+
+        pc = new RTCPeerConnection()
+
+        pc.ontrack = e => {
+            if (e.track.kind !== "video") return
+            console.log(e.track.kind)
+            const el = document.createElement("video")
+            el.srcObject = e.streams[0]
+            el.autoplay = true
+            el.playsInline = true
+            document.getElementById("remoteVideos").appendChild(el)
+        }
+
+        pc.onicecandidate = e => {
+            console.log("candidate")
+            if (!e.candidate) return
+            ws.send(JSON.stringify({
+                type: "candidate",
+                data: JSON.stringify(e.candidate),
+                sdp: "",
+                roomId: roomId
+            }))
+        }
+
+        pc.onnegotiationneeded = async () => {
+            try {
+                // If the browser is the one adding tracks, it should usually 
+                // create the Offer and send it to the server.
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+
+                ws.send(JSON.stringify({
+                    type: "offer", // Tell the server to handle this new offer
+                    data: JSON.stringify(offer),
+                    roomId: roomId
+                }));
+            } catch (err) {
+                console.error("Negotiation failed:", err);
+            }
+        };
+
+        document.getElementById("connect").onclick = () => {
+            roomId = document.getElementById("roomId").value
+            if (!roomId) {
+                alert("Enter room ID")
+                return
+            }
+
+            ws = new WebSocket("ws://localhost:8085/ws")
+
+            ws.onopen = () => {
+                ws.send(JSON.stringify({
+                    type: "join",
+                    data: "",
+                    sdp: "",
+                    roomId: roomId
+                }))
+            }
+
+            ws.onmessage = onWSMessage
+        }
+
+        document.getElementById("start").onclick = async () => {
+            console.log("start")
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert("Connect first")
+                return
+            }
+
+            const file = document.getElementById("videoFile").files[0]
+            if (!file) {
+                alert("Select a video file")
+                return
+            }
+
+            const video = document.getElementById("localVideo")
+            video.src = URL.createObjectURL(file)
+            video.loop = true
+            await video.play()
+
+            const stream = video.captureStream
+                ? video.captureStream()
+                : video.mozCaptureStream()
+
+            stream.getTracks().forEach(track => pc.addTrack(track, stream))
+        }
+
+        function onWSMessage(evt) {
+            const msg = JSON.parse(evt.data)
+
+            console.log(msg)
+            if (msg.type === "offer") {
+                const offer = JSON.parse(msg.data)
+                pc.setRemoteDescription(offer)
+                pc.createAnswer().then(answer => {
+                    pc.setLocalDescription(answer)
+                    ws.send(JSON.stringify({
+                        type: "answer",
+                        data: JSON.stringify(answer),
+                        roomId: roomId
+                    }))
+                })
+                return
+            }
+
+            if (msg.type === "candidate") {
+                pc.addIceCandidate(JSON.parse(msg.data))
+            }
+        }
+    </script>
+
+</body>
+
+</html>
