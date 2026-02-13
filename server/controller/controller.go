@@ -54,7 +54,7 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 		for _ = range ticker.C {
 			roomIds := ctrl.roomRepo.GetRooms()
 			for _, roomId := range roomIds {
-				ctrl.dispatch(roomId)
+				go ctrl.dispatch(roomId)
 			}
 		}
 	}()
@@ -73,6 +73,8 @@ func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
 	defer peerConnection.Close()
 
 	peer := common.NewPeer(peerConnection, c)
+
+	peerConnection.OnConnectionStateChange(ctrl.onConnectionChange(peer))
 
 	ctrl.logger.Debug("peer created", zap.String("id", peer.Id))
 
@@ -98,6 +100,8 @@ func (ctrl *controller) HandleConnection(c *common.SafeWebSocket) {
 		case "leave":
 			ctrl.LeaveRoom(peer, msg)
 		case "answer":
+			ctrl.logger.Info("answer came", zap.String("id", peer.Id))
+
 			answer := webrtc.SessionDescription{}
 			if err := json.Unmarshal([]byte(msg.Data), &answer); err != nil {
 				ctrl.logger.Error("failed to unmarshal answer", zap.Error(err))
@@ -245,7 +249,7 @@ func (ctrl *controller) onConnectionStateChange(peer *common.Peer) func(p webrtc
 	}
 }
 
-func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.TrackRemote, reciever *webrtc.RTPReceiver) {
 	ctrl.logger.Debug("track handler has been added", zap.String("roomId", msg.RoomId))
 
 	return func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
@@ -327,9 +331,22 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 					continue
 				}
 
-				if _, err := p.PeerConnection.AddTrack(track.Track); err != nil {
+				t, err := p.PeerConnection.AddTransceiverFromKind(track.Track.Kind(), webrtc.RTPTransceiverInit{
+					Direction: webrtc.RTPTransceiverDirectionSendonly,
+				})
+				if err != nil {
 					ctrl.logger.Error("failed to add track", zap.Error(err))
 				}
+
+				if t == nil {
+					continue
+				}
+
+				if track.Track == nil {
+					continue
+				}
+
+				t.Sender().ReplaceTrack(track.Track)
 			}
 		}
 
@@ -375,5 +392,20 @@ func (ctrl *controller) dispatch(room string) {
 				},
 			})
 		}
+	}
+}
+
+func (ctrl *controller) onConnectionChange(peer *common.Peer) func(state webrtc.PeerConnectionState) {
+
+	return func(state webrtc.PeerConnectionState) {
+		// if state == webrtc.PeerConnectionStateClosed {
+		// 	ctrl.roomRepo.LeaveRoom(peer, roomId)
+
+		// 	for _, sender := range peer.PeerConnection.GetSenders() {
+		// 		ctrl.roomRepo.RemoveTrack(sender.Track(), roomId)
+		// 	}
+		// }
+
+		// return
 	}
 }

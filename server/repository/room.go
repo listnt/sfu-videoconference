@@ -13,7 +13,7 @@ type RoomRepo interface {
 	JoinRoom(peer *common.Peer, room string)
 	AddTrack(peerId string, track *webrtc.TrackLocalStaticRTP, room string)
 	LeaveRoom(peer *common.Peer, room string)
-	RemoveTrack(track *webrtc.TrackLocalStaticRTP, room string)
+	RemoveTrack(track webrtc.TrackLocal, room string)
 	GetPeers(room string) map[string]*common.Peer
 	GetTracks(room string) map[string]Track
 	LockRoom(room string)
@@ -83,7 +83,7 @@ func (repo *roomRepo) AddTrack(peerId string, track *webrtc.TrackLocalStaticRTP,
 	}
 }
 
-func (repo *roomRepo) RemoveTrack(track *webrtc.TrackLocalStaticRTP, room string) {
+func (repo *roomRepo) RemoveTrack(track webrtc.TrackLocal, room string) {
 	repo.rooms[room].mu.Lock()
 	defer repo.rooms[room].mu.Unlock()
 

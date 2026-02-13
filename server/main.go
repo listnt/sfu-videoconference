@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 
@@ -25,6 +26,7 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
+	fmt.Println("Starting server...")
 	c := zap.NewProductionConfig()
 	c.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
 	logger, _ := c.Build()
