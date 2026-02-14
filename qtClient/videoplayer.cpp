@@ -2,9 +2,9 @@
 
 void videoPlayer::play(std::string mid)
 {
-    auto sink = this->mp[mid];
+    auto output = this->mp[mid];
 
-    if (!sink) {
+    if (!output) {
         auto proc = this->processing[mid];
         if (proc)
             return;
@@ -31,18 +31,20 @@ void videoPlayer::play(std::string mid)
 
             rectVisual->setParentItem(videoAreaVisual);
 
-            auto output = rect->findChild<QObject *>("videoOutput", Qt::FindChildrenRecursively);
+            auto voutput = rect->findChild<QObject *>("videoOutput", Qt::FindChildrenRecursively);
 
-            auto sink = output->property("videoSink").value<QVideoSink *>();
+            this->mp[mid] = voutput;
+            this->player->setVideoOutput(voutput);
 
-            this->mp[mid] = sink;
+            this->player->play();
+
             this->processing[mid] = false;
-
-            this->player->setVideoSink(sink);
 
             std::cout << "Element created" << std::endl;
         });
     }
+
+    // std::cout << this->player->mediaStatus() << std::endl;
 
     // sink->setVideoFrame(frame);
 }

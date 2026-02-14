@@ -235,21 +235,8 @@ void ConferenceClient::connectClient(QString url, QString roomId)
     });
 
     this->socket = new QLocalSocket();
-    this->socket->connectToServer("video-streams");
-    if (!this->socket->waitForConnected()) {
-        qDebug() << "Connection failed:" << this->socket->errorString();
-        std::abort();
-    }
 
     int *index = new int(0);
-    this->config = std::make_shared<rtc::RtpPacketizationConfig>(1,
-                                                                 "video-streams",
-                                                                 102,
-                                                                 rtc::VP8RtpPacketizer::ClockRate);
-
-    this->ofc = new std::fstream();
-
-    ofc->open("dump2.rtp", std::ios_base::out | std::ios_base::trunc);
 
     pc.onTrack([this, index](std::shared_ptr<rtc::Track> track) {
         std::cout << "track came, type=" << track->description().type() << std::endl;
@@ -288,11 +275,18 @@ void ConferenceClient::connectClient(QString url, QString roomId)
 
         if (mid == "2") {
             QMetaObject::invokeMethod(this->socket, [this, index, codec]() {
-                // std::stringbuf ofs;
+                this->socket->setServerName("video-streams");
+                this->socket->connectToServer("video-streams");
+                if (!this->socket->waitForConnected()) {
+                    qDebug() << "Connection failed:" << this->socket->errorString();
+                    std::abort();
+                }
 
-                // write_ivf_file_header(ofs, codec, 720, 720, 140, 1, 1000);
+                std::stringbuf ofs;
 
-                // this->socket->write(ofs.str().c_str(), ofs.str().size());
+                write_ivf_file_header(ofs, codec, 720, 720, 140, 1, 1000);
+
+                this->socket->write(ofs.str().c_str(), ofs.str().size());
                 // this->socket->flush();
             });
         }
@@ -300,44 +294,17 @@ void ConferenceClient::connectClient(QString url, QString roomId)
         track->onFrame([this, mid, index](rtc::binary frame, rtc::FrameInfo info) {
             if (mid == "2") {
                 QMetaObject::invokeMethod(this->socket, [this, index, frame]() {
-                    rtc::RtpHeader rtp;
-
-                    rtp.setPayloadType(this->config->payloadType);
-                    rtp.setSeqNumber((this->config->sequenceNumber)++); // increase sequence number
-                    rtp.setTimestamp(this->config->timestamp);
-                    rtp.setSsrc(this->config->ssrc);
-                    rtp.setMarker(true);
-
-                    rtp.preparePacket();
-
-                    const uint8_t P = 0b0001000;
-
                     std::stringbuf ofs;
-                    // write_ivf_frame_header(ofs, frame.size(), *index);
+                    write_ivf_frame_header(ofs, frame.size(), *index);
 
-                    char *buffer = reinterpret_cast<char *>(&rtp);
-
-                    this->socket->write(buffer, sizeof(rtp));
-                    this->socket->write(reinterpret_cast<const char *>(&P), 1);
+                    this->socket->write(ofs.str().c_str(), ofs.str().size());
                     this->socket->write(reinterpret_cast<const char *>(frame.data()), frame.size());
-
-                    this->ofc->write(buffer, sizeof(rtp));
-                    this->ofc->write(reinterpret_cast<const char *>(&P), 1);
-                    this->ofc->write(reinterpret_cast<const char *>(frame.data()), frame.size());
-                    this->ofc->flush();
-
-                    // this->socket->write(ofs.str().c_str(), ofs.str().size());
                     this->socket->flush();
                 });
 
-                ++(*index);
-
                 this->player->play(mid);
+                ++(*index);
             }
-
-            // QVideoFrame qFrame;
-
-            // this->player->play(qFrame, mid);
         });
 
         track->onOpen([track]() { track->requestKeyframe(); });
