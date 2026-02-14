@@ -1,6 +1,6 @@
 #include "videoplayer.h"
 
-void videoPlayer::play(QVideoFrame &frame, std::string mid)
+void videoPlayer::play(std::string mid)
 {
     auto sink = this->mp[mid];
 
@@ -37,6 +37,8 @@ void videoPlayer::play(QVideoFrame &frame, std::string mid)
 
             this->mp[mid] = sink;
             this->processing[mid] = false;
+
+            this->player->setVideoSink(sink);
 
             std::cout << "Element created" << std::endl;
         });

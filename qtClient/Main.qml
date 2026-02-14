@@ -66,7 +66,7 @@ Window {
                     connect.visible = !connect.visible
                     roomId.visible = !roomId.visible
 
-                    conference_client.connect("ws://localhost:8085/ws",roomId.text)
+                    conference_client.connectClient("ws://localhost:8085/ws",roomId.text)
                 }
             }
 
