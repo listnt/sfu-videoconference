@@ -9,6 +9,7 @@
 #include "rtc/rtc.hpp"
 #include "rtppipe.h"
 #include "videoplayer.h"
+#include <fstream>
 
 #include <QByteArray>
 #include <QJsonDocument>
@@ -32,7 +33,11 @@ private:
     std::vector<std::weak_ptr<rtc::Track>> tracks;
     std::shared_ptr<videoPlayer> player;
 
+    rtc::shared_ptr<rtc::RtpPacketizationConfig> config;
+
     QLocalSocket *socket;
+
+    std::fstream *ofc;
 
 public:
     explicit ConferenceClient(QObject *parent = nullptr)
