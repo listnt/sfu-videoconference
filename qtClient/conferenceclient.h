@@ -1,26 +1,25 @@
 #ifndef CONFERENCECLIENT_H
 #define CONFERENCECLIENT_H
-#include <QMediaPlayer>
-#include <QNetworkDatagram>
 #include <QObject>
 #include <QProcess>
 #include <QString>
-#include <QUdpSocket>
 #include "rtc/rtc.hpp"
-#include "rtppipe.h"
 #include "videoplayer.h"
-#include <fstream>
 
 #include <QByteArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
-#include <memory>
-
 #include <QLocalSocket>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+
+#include <functional>
+#include <utils.h>
+
+struct track_ptr
+{
+    std::weak_ptr<rtc::Track> track;
+    int index;
+};
 
 class ConferenceClient : public QObject
 {
@@ -30,7 +29,7 @@ private:
     rtc::PeerConnection pc;
     std::string roomId;
 
-    std::vector<std::weak_ptr<rtc::Track>> tracks;
+    std::unordered_map<std::string, track_ptr> track_index;
     std::shared_ptr<videoPlayer> player;
 
     rtc::shared_ptr<rtc::RtpPacketizationConfig> config;
@@ -42,8 +41,17 @@ private:
 public:
     explicit ConferenceClient(QObject *parent = nullptr)
         : QObject(parent) {};
-    void setVideoArea(std::shared_ptr<videoPlayer> player) { this->player = player; };
+    void SetVideoArea(std::shared_ptr<videoPlayer> player) { this->player = player; };
     Q_INVOKABLE void connectClient(QString url, QString roomId);
+
+private:
+    std::function<void(rtc::Description)> pcOnLocalDescription(QString roomId);
+    std::function<void(rtc::Candidate candidate)> pcOnLocalCandidate();
+    std::function<void()> wsOnOpen(QString roomId);
+    std::function<void(std::variant<rtc::binary, std::string> message)> wsOnMessage();
+    std::function<void(rtc::PeerConnection::GatheringState)> pcOnGatheringStateChange();
+    std::function<void(std::shared_ptr<rtc::Track>)> pcOnTrack();
+    std::function<void(rtc::binary, rtc::FrameInfo)> trackOnFrame(std::string mid);
 };
 
 #endif // CONFERENCECLIENT_H

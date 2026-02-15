@@ -15,7 +15,7 @@ void initVideoPlayers(QGuiApplication &app,
 
     std::shared_ptr<videoPlayer> player = std::make_shared<videoPlayer>(video, &engine, &app);
 
-    webrtcClient->setVideoArea(player);
+    webrtcClient->SetVideoArea(player);
 }
 
 void initWebRtcClient(QGuiApplication &app, QQmlApplicationEngine &engine)

@@ -5,113 +5,27 @@ typedef int SOCKET;
 using rtc::binary;
 using rtc::string;
 
-// Write 32-bit little-endian
-static void write_u32_le(std::stringbuf &ofs, uint32_t v)
-{
-    char b[4];
-    b[0] = static_cast<char>(v & 0xFF);
-    b[1] = static_cast<char>((v >> 8) & 0xFF);
-    b[2] = static_cast<char>((v >> 16) & 0xFF);
-    b[3] = static_cast<char>((v >> 24) & 0xFF);
-    ofs.sputn(b, 4);
-}
-
-// Write 16-bit little-endian
-static void write_u16_le(std::stringbuf &ofs, uint16_t v)
-{
-    char b[2];
-    b[0] = static_cast<char>(v & 0xFF);
-    b[1] = static_cast<char>((v >> 8) & 0xFF);
-    ofs.sputn(b, 2);
-}
-
-// Write IVF file header (32 bytes)
-static void write_ivf_file_header(std::stringbuf &ofs,
-                                  const char codec[4],
-                                  uint16_t width,
-                                  uint16_t height,
-                                  uint32_t framerate_num,
-                                  uint32_t framerate_den,
-                                  uint32_t frame_count)
-{
-    // Signature 'DKIF'
-    ofs.sputn("DKIF", 4);
-    // Version (2 bytes) and header size (2 bytes) -> version 0, header size 32
-    write_u16_le(ofs, 0);
-    write_u16_le(ofs, 32);
-    // FourCC codec
-    ofs.sputn(codec, 4);
-    // Width, Height (2 bytes each)
-    write_u16_le(ofs, width);
-    write_u16_le(ofs, height);
-    // Framerate numerator and denominator (4 bytes each)
-    write_u32_le(ofs, framerate_num);
-    write_u32_le(ofs, framerate_den);
-    // Frame count (4 bytes)
-    write_u32_le(ofs, frame_count);
-    // Unused (4 bytes)
-    write_u32_le(ofs, 0);
-}
-
-// Write per-frame header (12 bytes): size (4), 64-bit timestamp (we'll use 4 bytes low + 4 bytes high)
-static void write_ivf_frame_header(std::stringbuf &ofs, uint32_t frame_size, uint64_t timestamp)
-{
-    write_u32_le(ofs, frame_size);
-    // IVF uses a 64-bit timestamp; write low dword then high dword (little-endian)
-    uint32_t ts_low = static_cast<uint32_t>(timestamp & 0xFFFFFFFFu);
-    uint32_t ts_high = static_cast<uint32_t>((timestamp >> 32) & 0xFFFFFFFFu);
-    write_u32_le(ofs, ts_low);
-    write_u32_le(ofs, ts_high);
-}
-
-constexpr uint32_t fnv1a_32(const std::string &str)
-{
-    uint32_t hash = 2166136261u; // offset basis
-    constexpr uint32_t prime = 16777619u;
-
-    for (unsigned char c : str) {
-        hash ^= c;
-        hash *= prime;
-    }
-    return hash;
-}
-
-void setupProcessMonitor(QProcess *ffplay)
-{
-    QObject::connect(ffplay, &QProcess::stateChanged, [](QProcess::ProcessState newState) {
-        qDebug() << "Process State Changed to:" << newState;
-    });
-
-    // 2. Catch Critical Errors (e.g., File Not Found, Crashes)
-    QObject::connect(ffplay, &QProcess::errorOccurred, [ffplay](QProcess::ProcessError error) {
-        qDebug() << "CRITICAL ERROR:" << error;
-        qDebug() << "System Message:" << ffplay->errorString();
-    });
-
-    // 3. Catch Standard Error Output (Console errors from the app itself)
-    QObject::connect(ffplay, &QProcess::readyReadStandardError, [ffplay]() {
-        qDebug() << "PROCESS STDERR:" << ffplay->readAllStandardError();
-    });
-
-    // 4. Handle Exit
-    QObject::connect(ffplay,
-                     QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                     [](int exitCode, QProcess::ExitStatus exitStatus) {
-                         if (exitStatus == QProcess::CrashExit) {
-                             qDebug() << "Process crashed with code:" << exitCode;
-                         } else {
-                             qDebug() << "Process finished normally with code:" << exitCode;
-                         }
-                     });
-}
-
 void ConferenceClient::connectClient(QString url, QString roomId)
 {
+    this->socket = new QLocalSocket();
+
     rtc::InitLogger(rtc::LogLevel::Debug);
 
-    // rtc::InitLogger(rtc::LogLevel::Debug);
-    // When we create a local description (answer), send it to the SFU
-    pc.onLocalDescription([this, roomId](rtc::Description desc) {
+    pc.onLocalDescription(this->pcOnLocalDescription(roomId));
+    pc.onLocalCandidate(this->pcOnLocalCandidate());
+    pc.onGatheringStateChange(this->pcOnGatheringStateChange());
+
+    ws.onOpen(this->wsOnOpen(roomId));
+    ws.onMessage(this->wsOnMessage());
+
+    pc.onTrack(this->pcOnTrack());
+
+    ws.open(url.toStdString());
+}
+
+std::function<void(rtc::Description desc)> ConferenceClient::pcOnLocalDescription(QString roomId)
+{
+    return [this, roomId](rtc::Description desc) {
         const std::string sdp = desc.generateSdp();
 
         QJsonObject session_desc;
@@ -126,14 +40,19 @@ void ConferenceClient::connectClient(QString url, QString roomId)
 
         const auto json = QJsonDocument(obj).toJson(QJsonDocument::Compact).toStdString();
         ws.send(json);
-    });
+    };
+}
 
-    pc.onLocalCandidate([](rtc::Candidate candidate) {
+std::function<void(rtc::Candidate candidate)> ConferenceClient::pcOnLocalCandidate()
+{
+    return [](rtc::Candidate candidate) {
         std::cout << "CANDIDATE" << candidate.candidate() << std::endl;
-    });
+    };
+}
 
-    // Join room on WebSocket open (protocol-compatible with server)
-    ws.onOpen([this, roomId]() {
+std::function<void()> ConferenceClient::wsOnOpen(QString roomId)
+{
+    return [this, roomId]() {
         QJsonObject obj;
         obj["type"] = QStringLiteral("join");
         obj["data"] = QString();
@@ -141,11 +60,14 @@ void ConferenceClient::connectClient(QString url, QString roomId)
         obj["roomId"] = roomId;
 
         const auto json = QJsonDocument(obj).toJson(QJsonDocument::Compact).toStdString();
-        ws.send(json);
-    });
 
-    // Handle signaling messages from SFU
-    ws.onMessage([this](std::variant<binary, string> message) {
+        ws.send(json);
+    };
+}
+
+std::function<void(std::variant<rtc::binary, std::string> message)> ConferenceClient::wsOnMessage()
+{
+    return [this](std::variant<binary, string> message) {
         if (!std::holds_alternative<string>(message))
             return;
 
@@ -201,8 +123,6 @@ void ConferenceClient::connectClient(QString url, QString roomId)
             rtc::Description desc(sdp.toStdString(), descType);
 
             if (typeStr == QLatin1String("offer")) {
-                // Remote offer from SFU: set as remote description,
-                // then ask libdatachannel to create/send an answer
                 pc.setRemoteDescription(desc);
                 pc.setLocalDescription(rtc::Description::Type::Answer);
             } else {
@@ -210,8 +130,8 @@ void ConferenceClient::connectClient(QString url, QString roomId)
                 pc.setRemoteDescription(desc);
             }
 
-            for (auto track : this->tracks) {
-                if (auto ltrack = track.lock()) {
+            for (const auto &[mid, track_ptr] : this->track_index) {
+                if (auto ltrack = track_ptr.track.lock()) {
                     ltrack->peek();
                 }
             }
@@ -220,25 +140,45 @@ void ConferenceClient::connectClient(QString url, QString roomId)
         default:
             return;
         }
-    });
+    };
+}
 
-    pc.onGatheringStateChange([this](rtc::PeerConnection::GatheringState state) {
+std::function<void(rtc::PeerConnection::GatheringState)> ConferenceClient::pcOnGatheringStateChange()
+{
+    return [this](rtc::PeerConnection::GatheringState state) {
         std::cout << "Gathering State: " << state << std::endl;
         if (state == rtc::PeerConnection::GatheringState::Complete) {
             auto description = this->pc.localDescription();
             QJsonObject message;
             message["type"] = QString::fromStdString(description->typeString());
             message["sdp"] = QString::fromStdString(description.value());
-
-            // std::cout << QJsonDocument(message).toJson().toStdString() << std::endl;
         }
-    });
+    };
+}
 
-    this->socket = new QLocalSocket();
+std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid)
+{
+    return [this, mid](rtc::binary frame, rtc::FrameInfo info) {
+        if (mid == "2") {
+            QMetaObject::invokeMethod(this->socket, [this, mid, frame]() {
+                std::stringbuf ofs;
+                write_ivf_frame_header(ofs, frame.size(), this->track_index[mid].index);
 
-    int *index = new int(0);
+                this->socket->write(ofs.str().c_str(), ofs.str().size());
+                this->socket->write(reinterpret_cast<const char *>(frame.data()), frame.size());
+                this->socket->flush();
+            });
 
-    pc.onTrack([this, index](std::shared_ptr<rtc::Track> track) {
+            this->player->play(mid);
+        }
+
+        this->track_index[mid].index++;
+    };
+}
+
+std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
+{
+    return [this](std::shared_ptr<rtc::Track> track) {
         std::cout << "track came, type=" << track->description().type() << std::endl;
 
         // Only handle video tracks
@@ -256,6 +196,8 @@ void ConferenceClient::connectClient(QString url, QString roomId)
         }
 
         auto mid = track->description().mid();
+        this->track_index[mid] = {track, 0};
+
         if (codecFormat == "VP8") {
             track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
             std::cout << "VP8 codec" << std::endl;
@@ -274,7 +216,7 @@ void ConferenceClient::connectClient(QString url, QString roomId)
         const char codec[4] = {'V', 'P', '8', '0'};
 
         if (mid == "2") {
-            QMetaObject::invokeMethod(this->socket, [this, index, codec]() {
+            QMetaObject::invokeMethod(this->socket, [this, codec]() {
                 this->socket->setServerName("video-streams");
                 this->socket->connectToServer("video-streams");
                 if (!this->socket->waitForConnected()) {
@@ -291,26 +233,8 @@ void ConferenceClient::connectClient(QString url, QString roomId)
             });
         }
 
-        track->onFrame([this, mid, index](rtc::binary frame, rtc::FrameInfo info) {
-            if (mid == "2") {
-                QMetaObject::invokeMethod(this->socket, [this, index, frame]() {
-                    std::stringbuf ofs;
-                    write_ivf_frame_header(ofs, frame.size(), *index);
-
-                    this->socket->write(ofs.str().c_str(), ofs.str().size());
-                    this->socket->write(reinterpret_cast<const char *>(frame.data()), frame.size());
-                    this->socket->flush();
-                });
-
-                this->player->play(mid);
-                ++(*index);
-            }
-        });
+        track->onFrame(this->trackOnFrame(mid));
 
         track->onOpen([track]() { track->requestKeyframe(); });
-
-        this->tracks.push_back(track);
-    });
-
-    ws.open(url.toStdString());
+    };
 }
