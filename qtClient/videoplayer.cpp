@@ -34,9 +34,9 @@ void videoPlayer::play(std::string mid)
             auto voutput = rect->findChild<QObject *>("videoOutput", Qt::FindChildrenRecursively);
 
             this->mp[mid] = voutput;
-            this->player->setVideoOutput(voutput);
+            // this->player->setVideoOutput(voutput);
 
-            this->player->play();
+            // this->player->play();
 
             this->processing[mid] = false;
 

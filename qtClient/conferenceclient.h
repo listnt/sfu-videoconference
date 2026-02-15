@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include "constants.h"
 #include "rtc/rtc.hpp"
 #include "videoplayer.h"
 
@@ -12,11 +13,13 @@
 
 #include <QLocalSocket>
 
+#include <fstream>
 #include <functional>
 #include <utils.h>
 
 struct track_ptr
 {
+    QLocalSocket *socket;
     std::weak_ptr<rtc::Track> track;
     int index;
 };
@@ -31,12 +34,6 @@ private:
 
     std::unordered_map<std::string, track_ptr> track_index;
     std::shared_ptr<videoPlayer> player;
-
-    rtc::shared_ptr<rtc::RtpPacketizationConfig> config;
-
-    QLocalSocket *socket;
-
-    std::fstream *ofc;
 
 public:
     explicit ConferenceClient(QObject *parent = nullptr)

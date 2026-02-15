@@ -24,6 +24,7 @@ qt_add_qml_module(appqtClient
         QML_FILES SmallVideoRect.qml
         SOURCES
         SOURCES utils.h utils.cpp
+        SOURCES constants.h
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

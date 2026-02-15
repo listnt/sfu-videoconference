@@ -7,9 +7,7 @@ using rtc::string;
 
 void ConferenceClient::connectClient(QString url, QString roomId)
 {
-    this->socket = new QLocalSocket();
-
-    rtc::InitLogger(rtc::LogLevel::Debug);
+    rtc::InitLogger(rtc::LogLevel::Info);
 
     pc.onLocalDescription(this->pcOnLocalDescription(roomId));
     pc.onLocalCandidate(this->pcOnLocalCandidate());
@@ -156,26 +154,6 @@ std::function<void(rtc::PeerConnection::GatheringState)> ConferenceClient::pcOnG
     };
 }
 
-std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid)
-{
-    return [this, mid](rtc::binary frame, rtc::FrameInfo info) {
-        if (mid == "2") {
-            QMetaObject::invokeMethod(this->socket, [this, mid, frame]() {
-                std::stringbuf ofs;
-                write_ivf_frame_header(ofs, frame.size(), this->track_index[mid].index);
-
-                this->socket->write(ofs.str().c_str(), ofs.str().size());
-                this->socket->write(reinterpret_cast<const char *>(frame.data()), frame.size());
-                this->socket->flush();
-            });
-
-            this->player->play(mid);
-        }
-
-        this->track_index[mid].index++;
-    };
-}
-
 std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
 {
     return [this](std::shared_ptr<rtc::Track> track) {
@@ -196,7 +174,14 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         }
 
         auto mid = track->description().mid();
-        this->track_index[mid] = {track, 0};
+        std::string pname = MyApp::AppName + mid;
+
+        this->player->listen(pname, mid);
+
+        this->track_index[mid] = {nullptr, track, 0};
+        QMetaObject::invokeMethod(this, [this, mid, pname]() {
+            this->track_index[mid].socket = new QLocalSocket();
+        });
 
         if (codecFormat == "VP8") {
             track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
@@ -215,26 +200,56 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         // Codec FourCC for VP8 is "VP80"
         const char codec[4] = {'V', 'P', '8', '0'};
 
-        if (mid == "2") {
-            QMetaObject::invokeMethod(this->socket, [this, codec]() {
-                this->socket->setServerName("video-streams");
-                this->socket->connectToServer("video-streams");
-                if (!this->socket->waitForConnected()) {
-                    qDebug() << "Connection failed:" << this->socket->errorString();
-                    std::abort();
+        QMetaObject::invokeMethod(this->track_index[mid].socket, [this, mid, pname, codec]() {
+            this->track_index[mid].socket->setServerName(QString::fromStdString(pname));
+
+            while (true) {
+                this->track_index[mid].socket->connectToServer(QString::fromStdString(pname));
+                if (!this->track_index[mid].socket->waitForConnected(100)) {
+                    continue;
+                } else {
+                    break;
                 }
+            }
 
-                std::stringbuf ofs;
+            std::cout << "opened new socket "
+                      << this->track_index[mid].socket->serverName().toStdString() << std::endl;
 
-                write_ivf_file_header(ofs, codec, 720, 720, 140, 1, 1000);
+            std::stringbuf ofs;
 
-                this->socket->write(ofs.str().c_str(), ofs.str().size());
-                // this->socket->flush();
-            });
-        }
+            write_ivf_file_header(ofs, codec, 720, 720, 140, 1, 0xFFFFFFFF);
+
+            this->track_index[mid].socket->write(ofs.str().c_str(), ofs.str().size());
+            this->track_index[mid].socket->flush();
+        });
 
         track->onFrame(this->trackOnFrame(mid));
 
         track->onOpen([track]() { track->requestKeyframe(); });
+    };
+}
+
+std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid)
+{
+    return [this, mid](rtc::binary frame, rtc::FrameInfo info) {
+        QMetaObject::invokeMethod(this->track_index[mid].socket, [this, mid, frame]() {
+            std::stringbuf header_buf;
+            write_ivf_frame_header(header_buf, frame.size(), this->track_index[mid].index);
+
+            std::string header = std::move(header_buf).str();
+
+            std::vector<char> packet;
+            packet.reserve(header.size() + frame.size());
+            packet.insert(packet.end(), header.begin(), header.end());
+            packet.insert(packet.end(),
+                          reinterpret_cast<const char *>(frame.data()),
+                          reinterpret_cast<const char *>(frame.data()) + frame.size());
+
+            this->track_index[mid].socket->write(packet.data(), packet.size());
+            this->track_index[mid].socket->flush();
+        });
+
+        this->player->play(mid);
+        this->track_index[mid].index++;
     };
 }

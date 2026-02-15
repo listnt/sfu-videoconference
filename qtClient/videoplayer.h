@@ -7,12 +7,16 @@
 #include <QLocalSocket>
 #include <QMediaPlayer>
 #include <QObject>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
 #include <QVideoFrame>
 #include <QVideoSink>
+#include "utils.h"
 #include <iostream>
+
+#include <sys/stat.h>
 
 class videoPlayer
 {
@@ -22,13 +26,12 @@ private:
 
     QObject *videoArea;
 
-    QMediaPlayer *player;
+    std::vector<std::shared_ptr<QProcess>> players;
     std::unordered_map<std::string, QObject *> mp;
     std::unordered_map<std::string, bool> processing;
     int focusVideo = 2;
 
     QQmlComponent videoBlueprint;
-    QLocalServer *server;
     bool listening = false;
 
 public:
@@ -39,35 +42,27 @@ public:
         , app(app)
     {
         videoBlueprint.loadFromModule("qtClient", "SmallVideoRect");
-
-        QLocalServer::removeServer("video-streams");
-        this->server = new QLocalServer();
-
-        if (!this->server->listen("video-streams")) {
-            qDebug() << "Server failed to start:" << this->server->errorString();
-            std::abort();
-        }
-
-        QObject::connect(this->server, &QLocalServer::newConnection, [&]() {
-            QLocalSocket *client = this->server->nextPendingConnection();
-
-            QObject::connect(client, &QLocalSocket::readyRead, [client, this]() {
-                if (this->listening) {
-                    return;
-                }
-                this->listening = true;
-
-                std::cout << "starting listening" << std::endl;
-                this->player->setSourceDevice(client);
-            });
-
-            QObject::connect(client, &QLocalSocket::disconnected, client, &QObject::deleteLater);
-        });
-
-        std::cout << this->server->fullServerName().toStdString() << std::endl;
-
-        this->player = new QMediaPlayer();
     };
+
+    void listen(std::string pname, std::string mid)
+    {
+        auto player = std::make_shared<QProcess>();
+        QStringList arguments;
+
+        std::string pipeName = "/tmp/" + pname;
+
+        unlink(pipeName.c_str());
+        arguments << "-i" << QString::fromStdString("unix:/" + pipeName) << "-listen" << "1";
+
+        player->setArguments(arguments);
+        player->setProgram("ffplay");
+        player->setStandardErrorFile(QProcess::nullDevice());
+        player->setStandardOutputFile(QProcess::nullDevice());
+
+        player->start();
+
+        players.push_back(player);
+    }
 
     void play(std::string mid);
 };
