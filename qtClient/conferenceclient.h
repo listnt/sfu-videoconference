@@ -10,6 +10,7 @@
 #include <QByteArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QThread>
 
 #include <QLocalSocket>
 

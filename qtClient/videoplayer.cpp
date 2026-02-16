@@ -5,43 +5,64 @@ void videoPlayer::play(std::string mid)
     auto output = this->mp[mid];
 
     if (!output) {
-        auto proc = this->processing[mid];
-        if (proc)
+        qint64 pid = this->players[mid]->processId();
+
+        FILE *pipe
+            = popen(("wmctrl -lp | grep " + std::to_string(pid) + " | awk '{print $1}'").c_str(),
+                    "r");
+
+        char buff[128] = "";
+        fgets(buff, 128, pipe);
+
+        std::string winId = std::string(buff);
+        if (winId.size() < 4) {
             return;
-        this->processing[mid] = true;
+        }
 
-        QMetaObject::invokeMethod(this->app, [this, mid]() {
-            std::cout << "Creating element" << std::endl;
-            QObject *rect = this->videoBlueprint.create();
-            if (!this->videoBlueprint.errors().empty()) {
-                std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
-                          << std::endl;
-            }
+        winId.pop_back();
+        WId windowId = std::stoll(winId, 0, 16);
 
-            rect->setParent(this->videoArea);
+        std::call_once(this->processed[mid], [this, mid, windowId]() {
+            QMetaObject::invokeMethod(this->app, [this, mid, windowId]() {
+                std::cout << "Creating element" << std::endl;
+                QObject *rect = this->videoBlueprint.create();
+                if (!this->videoBlueprint.errors().empty()) {
+                    std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
+                              << std::endl;
+                }
 
-            QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
-            if (!rectVisual) {
-                std::abort();
-            }
-            QQuickItem *videoAreaVisual = qobject_cast<QQuickItem *>(this->videoArea);
-            if (!videoAreaVisual) {
-                std::abort();
-            }
+                rect->setParent(this->videoArea);
 
-            rectVisual->setParentItem(videoAreaVisual);
+                QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
+                if (!rectVisual) {
+                    std::abort();
+                }
+                QQuickItem *videoAreaVisual = qobject_cast<QQuickItem *>(this->videoArea);
+                if (!videoAreaVisual) {
+                    std::abort();
+                }
 
-            auto voutput = rect->findChild<QObject *>("videoOutput", Qt::FindChildrenRecursively);
+                rectVisual->setParentItem(videoAreaVisual);
 
-            this->mp[mid] = voutput;
-            // this->player->setVideoOutput(voutput);
+                auto player = QWindow::fromWinId(windowId);
+                rectVisual->setProperty("videoWindow", QVariant::fromValue(player));
 
-            // this->player->play();
+                auto voutput = rectVisual->findChild<QObject *>("videoOutput",
+                                                                Qt::FindChildrenRecursively);
 
-            this->processing[mid] = false;
+                voutput->blockSignals(true);
 
-            std::cout << "Element created" << std::endl;
+                this->mp[mid] = player;
+
+                // this->player->setVideoOutput(voutput);
+
+                // this->player->play();
+
+                std::cout << "Element created, pid:" << this->tmp << std::endl;
+            });
         });
+
+        return;
     }
 
     // std::cout << this->player->mediaStatus() << std::endl;

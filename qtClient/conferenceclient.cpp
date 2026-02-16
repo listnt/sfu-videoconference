@@ -195,17 +195,25 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         }
         track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
 
-        std::cout << mid << std::endl;
+        std::cout << "mid: " << mid << "\n"
+                  << "ssrc: " << track->description().getSSRCs() << std::endl;
 
         // Codec FourCC for VP8 is "VP80"
         const char codec[4] = {'V', 'P', '8', '0'};
 
-        QMetaObject::invokeMethod(this->track_index[mid].socket, [this, mid, pname, codec]() {
-            this->track_index[mid].socket->setServerName(QString::fromStdString(pname));
+        QMetaObject::invokeMethod(this, [this, mid, pname, codec]() {
+            std::cout << "opening socket mid: " << mid << std::endl;
 
+            this->track_index[mid].socket->setServerName(QString::fromStdString(pname));
             while (true) {
                 this->track_index[mid].socket->connectToServer(QString::fromStdString(pname));
-                if (!this->track_index[mid].socket->waitForConnected(100)) {
+                if (!this->track_index[mid].socket->waitForConnected(500)) {
+                    std::cout << "mid: " << mid << " error: "
+                              << this->track_index[mid].socket->errorString().toStdString()
+                              << std::endl;
+
+                    this->track_index[mid].socket->abort();
+                    QThread::msleep(100);
                     continue;
                 } else {
                     break;
@@ -232,7 +240,10 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
 std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid)
 {
     return [this, mid](rtc::binary frame, rtc::FrameInfo info) {
-        QMetaObject::invokeMethod(this->track_index[mid].socket, [this, mid, frame]() {
+        QMetaObject::invokeMethod(this, [this, mid, frame]() {
+            if (!this->track_index[mid].socket->isOpen())
+                return;
+
             std::stringbuf header_buf;
             write_ivf_frame_header(header_buf, frame.size(), this->track_index[mid].index);
 

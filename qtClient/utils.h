@@ -36,4 +36,15 @@ constexpr uint32_t fnv1a_32(const std::string &str)
 
 void setupProcessMonitor(QProcess *ffplay);
 
+template<typename T>
+std::ostream &operator<<(std::ostream &out, const std::vector<T> &v)
+{
+    if (!v.empty()) {
+        out << '[';
+        std::copy(v.begin(), v.end(), std::ostream_iterator<T>(out, ", "));
+        out << "\b\b]"; // use two ANSI backspace characters '\b' to overwrite final ", "
+    }
+    return out;
+}
+
 #endif // UTILS_H

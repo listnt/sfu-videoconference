@@ -4,13 +4,14 @@ import QtQuick.Layouts
 import QtMultimedia
 
 Window {
+    id: app
     width: 640
     height: 480
     minimumHeight: 400
     minimumWidth: 600
     visible: true
     objectName: "wnd"
-    title: qsTr("Hello World")
+    title: qsTr("Conference")
     RowLayout{
         anchors.fill: parent
         objectName: "MainArea"
@@ -67,6 +68,7 @@ Window {
                     roomId.visible = !roomId.visible
 
                     conference_client.connectClient("ws://localhost:8085/ws",roomId.text)
+                    app.title = "Conference:" + roomId.text
                 }
             }
 
