@@ -3,23 +3,18 @@
 
 #include <QFile>
 #include <QGuiApplication>
-#include <QLocalServer>
-#include <QLocalSocket>
-#include <QMediaPlayer>
 #include <QObject>
 #include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
-#include <QVideoFrame>
-#include <QVideoSink>
 #include <QWindow>
-#include <QtWidgets/QWidget>
+
 #include "utils.h"
 #include <cstdio>
 #include <iostream>
+#include <latch>
 #include <mutex>
-#include <sys/stat.h>
 
 class videoPlayer
 {
@@ -66,6 +61,8 @@ public:
         player->setStandardOutputFile(QProcess::nullDevice());
 
         player->start();
+
+        QMetaObject::invokeMethod(this->app, [this, player]() { player->setParent(this->app); });
 
         std::cout << "ffplay launched, mid: " << mid << std::endl;
 

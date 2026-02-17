@@ -32,6 +32,7 @@
         pc.ontrack = e => {
             if (e.track.kind !== "video") return
             console.log(e.track.kind)
+            console.log(e)
             const el = document.createElement("video")
             el.srcObject = e.streams[0]
             el.autoplay = true
@@ -125,7 +126,21 @@
                 ? video.captureStream()
                 : video.mozCaptureStream()
 
-            stream.getTracks().forEach(track => pc.addTrack(track, stream))
+            pc.addTransceiver(stream.getVideoTracks()[0], {
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [
+                    {
+                        rid: 'f'
+                    },
+                    {
+                        rid: 'q',
+                        scaleResolutionDownBy: 4.0
+                    }
+                ]
+            })
+            pc.addTransceiver('video')
+            pc.addTransceiver('video')
         }
 
         function onWSMessage(evt) {

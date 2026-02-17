@@ -10,9 +10,14 @@ void videoPlayer::play(std::string mid)
         FILE *pipe
             = popen(("wmctrl -lp | grep " + std::to_string(pid) + " | awk '{print $1}'").c_str(),
                     "r");
+        if (!pipe) {
+            errno;
+            return;
+        }
 
         char buff[128] = "";
         fgets(buff, 128, pipe);
+        pclose(pipe);
 
         std::string winId = std::string(buff);
         if (winId.size() < 4) {
@@ -30,7 +35,6 @@ void videoPlayer::play(std::string mid)
                     std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
                               << std::endl;
                 }
-
                 rect->setParent(this->videoArea);
 
                 QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);

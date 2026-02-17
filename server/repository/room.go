@@ -15,7 +15,7 @@ type RoomRepo interface {
 	LeaveRoom(peer *common.Peer, room string)
 	RemoveTrack(track webrtc.TrackLocal, room string)
 	GetPeers(room string) map[string]*common.Peer
-	GetTracks(room string) map[string]Track
+	GetTracks(room string) []Track
 	LockRoom(room string)
 	UnlockRoom(room string)
 	GetRooms() []string
@@ -31,7 +31,7 @@ type roomRepo struct {
 type Room struct {
 	mu     *sync.Mutex
 	peers  map[string]*common.Peer
-	tracks map[string]Track
+	tracks map[string][]Track
 }
 
 type Track struct {
@@ -55,7 +55,7 @@ func (repo *roomRepo) JoinRoom(peer *common.Peer, room string) {
 		repo.rooms[room] = &Room{
 			mu:     &sync.Mutex{},
 			peers:  make(map[string]*common.Peer),
-			tracks: make(map[string]Track),
+			tracks: make(map[string][]Track),
 		}
 	}
 
@@ -77,10 +77,10 @@ func (repo *roomRepo) AddTrack(peerId string, track *webrtc.TrackLocalStaticRTP,
 	repo.rooms[room].mu.Lock()
 	defer repo.rooms[room].mu.Unlock()
 
-	repo.rooms[room].tracks[track.ID()] = Track{
+	repo.rooms[room].tracks[track.ID()] = append(repo.rooms[room].tracks[track.ID()], Track{
 		Track:  track,
 		PeerId: peerId,
-	}
+	})
 }
 
 func (repo *roomRepo) RemoveTrack(track webrtc.TrackLocal, room string) {
@@ -94,8 +94,14 @@ func (repo *roomRepo) GetPeers(room string) map[string]*common.Peer {
 	return repo.rooms[room].peers
 }
 
-func (repo *roomRepo) GetTracks(room string) map[string]Track {
-	return repo.rooms[room].tracks
+func (repo *roomRepo) GetTracks(room string) []Track {
+	ret := make([]Track, 0)
+
+	for _, tracks := range repo.rooms[room].tracks {
+		ret = append(ret, tracks...)
+	}
+
+	return ret
 }
 
 func (repo *roomRepo) LockRoom(room string) {

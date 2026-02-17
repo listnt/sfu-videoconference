@@ -195,8 +195,18 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         }
         track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
 
-        std::cout << "mid: " << mid << "\n"
-                  << "ssrc: " << track->description().getSSRCs() << std::endl;
+        std::cout << "mid: " << mid << "\n rid: " << std::endl;
+        std::cout << "ssrc: ";
+        for (auto p : track->description().getSSRCs()) {
+            std::cout << p << " ";
+        }
+        std::cout << std::endl;
+
+        std::cout << "attributes: ";
+        for (auto p : track->description().attributes()) {
+            std::cout << " " << p << "\n";
+        }
+        std::cout << std::endl;
 
         // Codec FourCC for VP8 is "VP80"
         const char codec[4] = {'V', 'P', '8', '0'};
