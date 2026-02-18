@@ -8,6 +8,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -269,12 +270,26 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 	ctrl.logger.Debug("track handler has been added", zap.String("roomId", msg.RoomId))
 
 	return func(t *webrtc.TrackRemote, reciever *webrtc.RTPReceiver) {
+		caps, _ := json.Marshal(reciever.GetParameters())
+		streamInfos := common.Collect(reciever.Encodings, func(s webrtc.TrackStreams) *interceptor.StreamInfo {
+			return s.StreamInfo
+		})
+
+		for _, s := range streamInfos {
+			if s == nil {
+				continue
+			}
+
+			fmt.Println(*s)
+		}
+
 		ctrl.logger.Info("track has been added",
 			zap.String("kind", t.Kind().String()),
 			zap.String("id", t.ID()),
 			zap.Uint32("ssrc", uint32(t.SSRC())),
 			zap.String("rid", t.RID()),
 			zap.Int("total tracks", len(reciever.Tracks())),
+			zap.String("capabilities", string(caps)),
 		)
 
 		// Create a track to fan out our incoming video to all peers
@@ -301,7 +316,7 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 		ctrl.simulcastLock.Add(t.ID(), 1)
 
 		buf := make([]byte, 1500)
-		rtpPkt := &rtp.Packet{}
+		pps := 0
 
 		for {
 			i, _, err := t.Read(buf)
@@ -309,18 +324,27 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 				return
 			}
 
+			rtpPkt := &rtp.Packet{}
 			if err = rtpPkt.Unmarshal(buf[:i]); err != nil {
 				ctrl.logger.Error("failed to unmarshal RTP packet", zap.Error(err))
 
 				return
 			}
 
-			rtpPkt.Extension = false
-			rtpPkt.Extensions = nil
+			if pps%100 == 0 {
+				// ctrl.logger.Info("RTP packet header",
+				// 	zap.Any("Header", rtpPkt.Header),
+				// )
+			}
+
+			// rtpPkt.Extension = false
+			// rtpPkt.Extensions = nil
 
 			if err = trackLocal.WriteRTP(rtpPkt); err != nil {
 				return
 			}
+
+			pps++
 		}
 	}
 }
@@ -391,6 +415,10 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 					continue
 				}
 
+				if sender.HasSent() {
+					continue
+				}
+
 				ctrl.logger.Info("adding track to existing sender",
 					zap.String("trackId", track.Track.ID()),
 					zap.String("rid", track.Track.RID()),
@@ -399,6 +427,8 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 				err := sender.AddEncoding(track.Track)
 				if err != nil {
 					ctrl.logger.Error("failed to add encoding", zap.Error(err))
+
+					continue
 				}
 
 				flag = true
