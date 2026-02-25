@@ -101,10 +101,6 @@ void videoPlayer::play(rtc::binary frame, rtc::FrameInfo info, std::string mid, 
             break;
         }
     }
-
-    // std::cout << this->player->mediaStatus() << std::endl;
-
-    // sink->setVideoFrame(frame);
 }
 
 void videoPlayer::decode(std::string mid)
@@ -117,35 +113,32 @@ void videoPlayer::decode(std::string mid)
     }
     while (ret >= 0) {
         ret = avcodec_receive_frame(this->frames[mid].c, this->frames[mid].frame);
+        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+            return;
 
-        std::call_once(*this->frameInit[mid], [this, mid]() {
-            QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
-                                           this->frames[mid].frame->height),
-                                     QVideoFrameFormat::PixelFormat::Format_YUV420P);
+        QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
+                                       this->frames[mid].frame->height),
+                                 QVideoFrameFormat::PixelFormat::Format_YUV420P);
 
-            this->qFrames[mid] = new QVideoFrame(format);
-            this->mp[mid]->setVideoFrame(*this->qFrames[mid]);
-        });
+        QVideoFrame frame(format); // TODO, find a method for frame reuse
+        // });
 
-        if (this->qFrames[mid]->map(QVideoFrame::WriteOnly)) {
-            // Copy planes from AVFrame to QVideoFrame
-            // Note: You must handle the planes (Y, U, V) based on the format
+        if (frame.map(QVideoFrame::WriteOnly)) {
             for (int i = 0; i < 3; ++i) {
                 uint8_t *src = this->frames[mid].frame->data[i];
-                uint8_t *dst = this->qFrames[mid]->bits(i);
-                int srcStride = this->frames[mid].frame->linesize[i];
-                int dstStride = this->qFrames[mid]->bytesPerLine(i);
+                uint8_t *dst = frame.bits(i);
 
-                int lineSizeInBytes = (i == 0) ? this->frames[mid].frame->width
-                                               : this->frames[mid].frame->width / 2;
-                int planeHeight = (i == 0) ? this->frames[mid].frame->height
-                                           : this->frames[mid].frame->height / 2;
+                int size = this->frames[mid].frame->width * this->frames[mid].frame->height;
 
-                for (int y = 0; y < planeHeight; ++y) {
-                    memcpy(dst + y * dstStride, src + y * srcStride, lineSizeInBytes);
+                if (i == 0) {
+                    memcpy(dst, src, size);
+                } else {
+                    memcpy(dst, src, size >> 2);
                 }
             }
-            this->qFrames[mid]->unmap();
+            frame.unmap();
         }
+
+        this->mp[mid]->setVideoFrame(frame);
     }
 }
