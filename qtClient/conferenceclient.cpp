@@ -174,26 +174,8 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         }
 
         auto mid = track->description().mid();
-        std::string pname = MyApp::AppName + mid;
 
-        this->player->listen(pname, mid);
-
-        this->track_index[mid] = {nullptr, track, 0};
-        QMetaObject::invokeMethod(this, [this, mid, pname]() {
-            this->track_index[mid].socket = new QLocalSocket();
-        });
-
-        if (codecFormat == "VP8") {
-            track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
-            std::cout << "VP8 codec" << std::endl;
-        } else if (codecFormat == "H264") {
-            track->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>());
-            std::cout << "H264 code" << std::endl;
-        } else {
-            std::cout << "unknown codec '" << codecFormat << "', defaulting to VP8" << std::endl;
-            track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
-        }
-        track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+        this->track_index[mid] = {track, 0};
 
         std::cout << "mid: " << mid << "\n rid: " << std::endl;
         std::cout << "ssrc: ";
@@ -207,70 +189,23 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
             std::cout << " " << p << "\n";
         }
         std::cout << std::endl;
+        this->player->listen(mid);
 
-        // Codec FourCC for VP8 is "VP80"
-        const char codec[4] = {'V', 'P', '8', '0'};
+        std::string codec = "VP80"; // TODO replace with actual codec selection later
 
-        QMetaObject::invokeMethod(this, [this, mid, pname, codec]() {
-            std::cout << "opening socket mid: " << mid << std::endl;
+        track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
+        track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
 
-            this->track_index[mid].socket->setServerName(QString::fromStdString(pname));
-            while (true) {
-                this->track_index[mid].socket->connectToServer(QString::fromStdString(pname));
-                if (!this->track_index[mid].socket->waitForConnected(500)) {
-                    std::cout << "mid: " << mid << " error: "
-                              << this->track_index[mid].socket->errorString().toStdString()
-                              << std::endl;
-
-                    this->track_index[mid].socket->abort();
-                    QThread::msleep(100);
-                    continue;
-                } else {
-                    break;
-                }
-            }
-
-            std::cout << "opened new socket "
-                      << this->track_index[mid].socket->serverName().toStdString() << std::endl;
-
-            std::stringbuf ofs;
-
-            write_ivf_file_header(ofs, codec, 720, 720, 140, 1, 0xFFFFFFFF);
-
-            this->track_index[mid].socket->write(ofs.str().c_str(), ofs.str().size());
-            this->track_index[mid].socket->flush();
-        });
-
-        track->onFrame(this->trackOnFrame(mid));
+        track->onFrame(this->trackOnFrame(mid, codec));
 
         track->onOpen([track]() { track->requestKeyframe(); });
     };
 }
 
-std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid)
+std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid,
+                                                                                std::string codec)
 {
-    return [this, mid](rtc::binary frame, rtc::FrameInfo info) {
-        QMetaObject::invokeMethod(this, [this, mid, frame]() {
-            if (!this->track_index[mid].socket->isOpen())
-                return;
-
-            std::stringbuf header_buf;
-            write_ivf_frame_header(header_buf, frame.size(), this->track_index[mid].index);
-
-            std::string header = std::move(header_buf).str();
-
-            std::vector<char> packet;
-            packet.reserve(header.size() + frame.size());
-            packet.insert(packet.end(), header.begin(), header.end());
-            packet.insert(packet.end(),
-                          reinterpret_cast<const char *>(frame.data()),
-                          reinterpret_cast<const char *>(frame.data()) + frame.size());
-
-            this->track_index[mid].socket->write(packet.data(), packet.size());
-            this->track_index[mid].socket->flush();
-        });
-
-        this->player->play(mid);
-        this->track_index[mid].index++;
+    return [this, mid, codec](rtc::binary frame, rtc::FrameInfo info) {
+        this->player->play(frame, info, mid, codec);
     };
 }

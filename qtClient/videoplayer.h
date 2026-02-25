@@ -3,18 +3,40 @@
 
 #include <QFile>
 #include <QGuiApplication>
+#include <QImage>
+#include <QMediaPlayer>
 #include <QObject>
-#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlComponent>
 #include <QQuickItem>
-#include <QWindow>
+#include <QVideoFrame>
+#include <QVideoFrameFormat>
+#include <QVideoSink>
 
+#include "rtc/rtc.hpp"
 #include "utils.h"
 #include <cstdio>
 #include <iostream>
-#include <latch>
 #include <mutex>
+
+#ifdef __linux__
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavformat/avio.h>
+#include <libavutil/mem.h>
+}
+struct decoder
+{
+    AVCodec *codec;
+    AVCodecParserContext *parser;
+    AVCodecContext *c;
+    AVFrame *frame;
+    AVPacket *pkt;
+};
+
+#elif _WIN32
+#endif
 
 class videoPlayer
 {
@@ -25,9 +47,18 @@ private:
     QObject *videoArea;
 
     qint64 tmp;
-    std::unordered_map<std::string, QWindow *> mp;
-    std::unordered_map<std::string, QProcess *> players;
-    std::unordered_map<std::string, std::once_flag> processed;
+    std::unordered_map<std::string, QMediaPlayer *> players;
+    std::unordered_map<std::string, QVideoSink *> mp;
+
+    std::unordered_map<std::string, QVideoFrame *> qFrames;
+    std::unordered_map<std::string, std::once_flag *> frameInit;
+
+#ifdef __linux__
+    std::unordered_map<std::string, decoder> frames;
+#elif _WIN32
+#endif
+
+    std::unordered_map<std::string, std::once_flag *> processed;
 
     int focusVideo = 2;
     QQmlComponent videoBlueprint;
@@ -40,36 +71,19 @@ public:
         , app(app)
     {
         videoBlueprint.loadFromModule("qtClient", "SmallVideoRect");
+        if (!videoBlueprint.isError()) {
+            std::cout << videoBlueprint.errorString().toStdString() << std::endl;
+        }
     };
 
-    void listen(std::string pname, std::string mid)
+    void listen(std::string mid)
     {
-        auto player = new QProcess();
-        QStringList arguments;
-
-        std::string pipeName = "/tmp/" + pname;
-
-        std::cout << "launching ffplay, mid: " << mid << std::endl;
-
-        std::remove(pipeName.c_str());
-        arguments << "-i" << QString::fromStdString("unix:/" + pipeName) << "-noborder" << "-listen"
-                  << "1";
-
-        player->setArguments(arguments);
-        player->setProgram("ffplay");
-        player->setStandardErrorFile(QProcess::nullDevice());
-        player->setStandardOutputFile(QProcess::nullDevice());
-
-        player->start();
-
-        QMetaObject::invokeMethod(this->app, [this, player]() { player->setParent(this->app); });
-
-        std::cout << "ffplay launched, mid: " << mid << std::endl;
-
-        this->players[mid] = player;
-    }
-
-    void play(std::string mid);
+        this->processed[mid] = new std::once_flag();
+        this->frameInit[mid] = new std::once_flag();
+        this->mp[mid] = nullptr;
+    };
+    void play(rtc::binary frame, rtc::FrameInfo info, std::string mid, std::string codec);
+    void decode(std::string mid);
 };
 
 #endif // VIDEOPLAYER_H

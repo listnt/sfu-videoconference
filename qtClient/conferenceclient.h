@@ -20,7 +20,6 @@
 
 struct track_ptr
 {
-    QLocalSocket *socket;
     std::weak_ptr<rtc::Track> track;
     int index;
 };
@@ -49,7 +48,8 @@ private:
     std::function<void(std::variant<rtc::binary, std::string> message)> wsOnMessage();
     std::function<void(rtc::PeerConnection::GatheringState)> pcOnGatheringStateChange();
     std::function<void(std::shared_ptr<rtc::Track>)> pcOnTrack();
-    std::function<void(rtc::binary, rtc::FrameInfo)> trackOnFrame(std::string mid);
+    std::function<void(rtc::binary, rtc::FrameInfo)> trackOnFrame(std::string mid,
+                                                                  std::string codec);
 };
 
 #endif // CONFERENCECLIENT_H

@@ -40,10 +40,16 @@ set_target_properties(appqtClient PROPERTIES
 
 add_subdirectory(third_party/libdatachannel)
 
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(AVCODEC REQUIRED IMPORTED_TARGET libavcodec)
+pkg_check_modules(AVUTIL REQUIRED IMPORTED_TARGET libavutil)
+
 target_link_libraries(appqtClient
     PRIVATE Qt6::Quick
     Qt6::Multimedia
     datachannel
+    PkgConfig::AVCODEC
+    PkgConfig::AVUTIL
 )
 
 target_include_directories(appqtClient PRIVATE

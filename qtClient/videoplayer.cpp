@@ -1,75 +1,151 @@
 #include "videoplayer.h"
 
-void videoPlayer::play(std::string mid)
+void videoPlayer::play(rtc::binary frame, rtc::FrameInfo info, std::string mid, std::string codec)
 {
-    auto output = this->mp[mid];
+    auto sink = this->mp[mid];
+    if (!sink) {
+        std::call_once(*this->processed[mid], [this, mid, codec]() {
+            this->frames[mid] = {};
+            if (codec == "VP90") {
+                std::cout << "ffmpeg player initialized with codec VP9" << std::endl;
+                this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP9);
+            } else if (codec == "VP80") {
+                std::cout << "ffmpeg player initialized with codec VP8" << std::endl;
+                this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP8);
+            }
 
-    if (!output) {
-        qint64 pid = this->players[mid]->processId();
+            if (!this->frames[mid].codec) {
+                std::cout << "codec not found" << codec << std::endl;
+                exit(1);
+            }
 
-        FILE *pipe
-            = popen(("wmctrl -lp | grep " + std::to_string(pid) + " | awk '{print $1}'").c_str(),
-                    "r");
-        if (!pipe) {
-            errno;
-            return;
-        }
+            this->frames[mid].parser = av_parser_init(this->frames[mid].codec->id);
+            if (!this->frames[mid].parser) {
+                std::cout << "parser not found" << std::endl;
+                exit(1);
+            }
 
-        char buff[128] = "";
-        fgets(buff, 128, pipe);
-        pclose(pipe);
+            this->frames[mid].c = avcodec_alloc_context3(this->frames[mid].codec);
+            if (!this->frames[mid].c) {
+                std::cout << "contextnot found" << std::endl;
+                exit(1);
+            }
 
-        std::string winId = std::string(buff);
-        if (winId.size() < 4) {
-            return;
-        }
+            if (avcodec_open2(this->frames[mid].c, this->frames[mid].codec, NULL) < 0) {
+                std::cout << "failed to open codec" << std::endl;
+                exit(1);
+            }
 
-        winId.pop_back();
-        WId windowId = std::stoll(winId, 0, 16);
+            this->frames[mid].frame = av_frame_alloc();
+            this->frames[mid].pkt = av_packet_alloc();
 
-        std::call_once(this->processed[mid], [this, mid, windowId]() {
-            QMetaObject::invokeMethod(this->app, [this, mid, windowId]() {
-                std::cout << "Creating element" << std::endl;
-                QObject *rect = this->videoBlueprint.create();
-                if (!this->videoBlueprint.errors().empty()) {
-                    std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
-                              << std::endl;
-                }
-                rect->setParent(this->videoArea);
+            QMetaObject::invokeMethod(
+                this->app,
+                [this, mid]() {
+                    std::cout << "Creating element" << std::endl;
+                    QObject *rect = this->videoBlueprint.create();
+                    if (!this->videoBlueprint.errors().empty()) {
+                        std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
+                                  << std::endl;
+                    }
+                    std::cout << "blueprint created" << std::endl;
 
-                QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
-                if (!rectVisual) {
-                    std::abort();
-                }
-                QQuickItem *videoAreaVisual = qobject_cast<QQuickItem *>(this->videoArea);
-                if (!videoAreaVisual) {
-                    std::abort();
-                }
+                    rect->setParent(this->videoArea);
 
-                rectVisual->setParentItem(videoAreaVisual);
+                    QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
+                    if (!rectVisual) {
+                        std::abort();
+                    }
+                    QQuickItem *videoAreaVisual = qobject_cast<QQuickItem *>(this->videoArea);
+                    if (!videoAreaVisual) {
+                        std::abort();
+                    }
 
-                auto player = QWindow::fromWinId(windowId);
-                rectVisual->setProperty("videoWindow", QVariant::fromValue(player));
+                    rectVisual->setParentItem(videoAreaVisual);
 
-                auto voutput = rectVisual->findChild<QObject *>("videoOutput",
-                                                                Qt::FindChildrenRecursively);
+                    auto voutput = rect->findChild<QObject *>("videoOutput",
+                                                              Qt::FindChildrenRecursively);
 
-                voutput->blockSignals(true);
+                    auto sink = voutput->property("videoSink").value<QVideoSink *>();
 
-                this->mp[mid] = player;
+                    this->mp[mid] = sink;
+                    this->players[mid] = new QMediaPlayer();
+                    this->players[mid]->setVideoOutput(voutput);
+                    this->players[mid]->play();
 
-                // this->player->setVideoOutput(voutput);
-
-                // this->player->play();
-
-                std::cout << "Element created, pid:" << this->tmp << std::endl;
-            });
+                    std::cout << "Element created" << std::endl;
+                },
+                Qt::BlockingQueuedConnection);
         });
 
         return;
     }
 
+    auto start = reinterpret_cast<const uint8_t *>(frame.data());
+    auto end = start + frame.size();
+
+    while (start < end) {
+        auto ret = av_parser_parse2(this->frames[mid].parser,
+                                    this->frames[mid].c,
+                                    &(this->frames[mid].pkt->data),
+                                    &(this->frames[mid].pkt->size),
+                                    start,
+                                    frame.size(),
+                                    AV_NOPTS_VALUE,
+                                    AV_NOPTS_VALUE,
+                                    0);
+        start += ret;
+        if (this->frames[mid].pkt->size) {
+            this->decode(mid);
+        } else {
+            break;
+        }
+    }
+
     // std::cout << this->player->mediaStatus() << std::endl;
 
     // sink->setVideoFrame(frame);
+}
+
+void videoPlayer::decode(std::string mid)
+{
+    auto ret = avcodec_send_packet(this->frames[mid].c, this->frames[mid].pkt);
+    if (ret < 0) {
+        char errbuf[256];
+        av_strerror(ret, errbuf, sizeof(errbuf));
+        std::cout << "error occured: " << errbuf << std::endl;
+    }
+    while (ret >= 0) {
+        ret = avcodec_receive_frame(this->frames[mid].c, this->frames[mid].frame);
+
+        std::call_once(*this->frameInit[mid], [this, mid]() {
+            QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
+                                           this->frames[mid].frame->height),
+                                     QVideoFrameFormat::PixelFormat::Format_YUV420P);
+
+            this->qFrames[mid] = new QVideoFrame(format);
+            this->mp[mid]->setVideoFrame(*this->qFrames[mid]);
+        });
+
+        if (this->qFrames[mid]->map(QVideoFrame::WriteOnly)) {
+            // Copy planes from AVFrame to QVideoFrame
+            // Note: You must handle the planes (Y, U, V) based on the format
+            for (int i = 0; i < 3; ++i) {
+                uint8_t *src = this->frames[mid].frame->data[i];
+                uint8_t *dst = this->qFrames[mid]->bits(i);
+                int srcStride = this->frames[mid].frame->linesize[i];
+                int dstStride = this->qFrames[mid]->bytesPerLine(i);
+
+                int lineSizeInBytes = (i == 0) ? this->frames[mid].frame->width
+                                               : this->frames[mid].frame->width / 2;
+                int planeHeight = (i == 0) ? this->frames[mid].frame->height
+                                           : this->frames[mid].frame->height / 2;
+
+                for (int y = 0; y < planeHeight; ++y) {
+                    memcpy(dst + y * dstStride, src + y * srcStride, lineSizeInBytes);
+                }
+            }
+            this->qFrames[mid]->unmap();
+        }
+    }
 }
