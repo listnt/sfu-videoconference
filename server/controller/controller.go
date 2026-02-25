@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -34,7 +35,12 @@ type controller struct {
 	roomRepo repository.RoomRepo
 	api      *webrtc.API
 
-	simulcastLock *lru.ARCCache
+	simulcastLock         *lru.ARCCache
+	trackExtentionHeaders map[string]map[string]common.RtpExtentions
+	mu                    sync.Mutex
+
+	// experiments, delete when stable
+	// conn                  net.Conn
 }
 
 func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller {
@@ -53,11 +59,14 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 		panic(1)
 	}
 
+	// conn, _ := net.Dial("udp", "127.0.0.1:44444")
+
 	ctrl := &controller{
 		api:           api,
 		logger:        logger,
 		roomRepo:      roomRepo,
 		simulcastLock: cache,
+		// conn:          conn,
 	}
 
 	go func() {
@@ -316,7 +325,6 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 		ctrl.simulcastLock.Add(t.ID(), 1)
 
 		buf := make([]byte, 1500)
-		pps := 0
 
 		for {
 			i, _, err := t.Read(buf)
@@ -331,20 +339,13 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 				return
 			}
 
-			if pps%100 == 0 {
-				// ctrl.logger.Info("RTP packet header",
-				// 	zap.Any("Header", rtpPkt.Header),
-				// )
-			}
-
-			// rtpPkt.Extension = false
-			// rtpPkt.Extensions = nil
-
 			if err = trackLocal.WriteRTP(rtpPkt); err != nil {
 				return
 			}
 
-			pps++
+			// experiments, delete when stable
+			// b, _ := rtpPkt.Marshal()
+			// ctrl.conn.Write(b)
 		}
 	}
 }
@@ -403,53 +404,20 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 				continue
 			}
 
-			// Don't send high res track
-			// if track.Track.RID() == "f" {
-			// 	continue
-			// }
+			// if no sender is found, create a new one
+			ctrl.logger.Info("adding track to new sender",
+				zap.String("trackId", track.Track.ID()),
+				zap.String("rid", track.Track.RID()),
+			)
 
-			flag := false
-			senders := p.PeerConnection.GetSenders()
-			for _, sender := range senders { // Add tracks to simulcast senders
-				if sender.Track() != nil && sender.Track().ID() != track.Track.ID() {
-					continue
-				}
-
-				if sender.HasSent() {
-					continue
-				}
-
-				ctrl.logger.Info("adding track to existing sender",
-					zap.String("trackId", track.Track.ID()),
-					zap.String("rid", track.Track.RID()),
-				)
-
-				err := sender.AddEncoding(track.Track)
-				if err != nil {
-					ctrl.logger.Error("failed to add encoding", zap.Error(err))
-
-					continue
-				}
-
-				flag = true
-				break
+			t, err := p.PeerConnection.AddTransceiverFromTrack(track.Track, webrtc.RTPTransceiverInit{
+				Direction: webrtc.RTPTransceiverDirectionSendonly,
+			})
+			if err != nil {
+				ctrl.logger.Error("failed to add track", zap.Error(err))
 			}
-
-			if !flag { // if no sender is found, create a new one
-				ctrl.logger.Info("adding track to new sender",
-					zap.String("trackId", track.Track.ID()),
-					zap.String("rid", track.Track.RID()),
-				)
-
-				t, err := p.PeerConnection.AddTransceiverFromTrack(track.Track, webrtc.RTPTransceiverInit{
-					Direction: webrtc.RTPTransceiverDirectionSendonly,
-				})
-				if err != nil {
-					ctrl.logger.Error("failed to add track", zap.Error(err))
-				}
-				if t == nil {
-					continue
-				}
+			if t == nil {
+				continue
 			}
 		}
 
@@ -498,11 +466,13 @@ func (ctrl *controller) dispatch(room string) {
 				continue
 			}
 
-			_ = peer.PeerConnection.WriteRTCP([]rtcp.Packet{
-				&rtcp.PictureLossIndication{
-					MediaSSRC: uint32(reciever.Track().SSRC()),
-				},
-			})
+			for _, track := range reciever.Tracks() {
+				_ = peer.PeerConnection.WriteRTCP([]rtcp.Packet{
+					&rtcp.PictureLossIndication{
+						MediaSSRC: uint32(track.SSRC()),
+					},
+				})
+			}
 		}
 	}
 }

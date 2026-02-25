@@ -126,21 +126,21 @@
                 ? video.captureStream()
                 : video.mozCaptureStream()
 
-            pc.addTransceiver(stream.getVideoTracks()[0], {
+            // const { codecs } = RTCRtpSender.getCapabilities('video');
+            // const vp9Codecs = codecs.filter(c => c.mimeType === 'video/VP9');
+
+            const transceiver = pc.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
-                sendEncodings: [
-                    {
-                        rid: 'f'
-                    },
-                    {
-                        rid: 'q',
-                        scaleResolutionDownBy: 4.0
-                    }
-                ]
+                // sendEncodings: [
+                //     {
+                //         rid: 'f',
+                //         scalabilityMode: "L3T3"
+                //     }
+                // ]
             })
-            pc.addTransceiver('video')
-            pc.addTransceiver('video')
+
+            // transceiver.setCodecPreferences(vp9Codecs);
         }
 
         function onWSMessage(evt) {
@@ -151,7 +151,23 @@
                 const offer = JSON.parse(msg.data)
                 pc.setRemoteDescription(offer)
                 pc.createAnswer().then(answer => {
+                    console.log(offer)
+                    console.log(answer)
+
+                    var arr = answer.sdp.split('\r\n');
+                    arr.forEach((str, i) => {
+                        if (/^a=fmtp:\d*/.test(str)) {
+                            arr[i] = str + ';x-google-max-bitrate=10000;x-google-min-bitrate=0;x-google-start-bitrate=6000';
+                        } else if (/^a=mid:(1|video)/.test(str)) {
+                            arr[i] += '\r\nb=AS:10000';
+                        }
+                    });
+                    answer = new RTCSessionDescription({
+                        type: 'answer',
+                        sdp: arr.join('\r\n'),
+                    })
                     pc.setLocalDescription(answer)
+
                     ws.send(JSON.stringify({
                         type: "answer",
                         data: JSON.stringify(answer),

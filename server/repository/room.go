@@ -98,7 +98,7 @@ func (repo *roomRepo) GetTracks(room string) []Track {
 	ret := make([]Track, 0)
 
 	for _, tracks := range repo.rooms[room].tracks {
-		ret = append(ret, tracks...)
+		ret = append(ret, common.Reverse(tracks)...)
 	}
 
 	return ret
