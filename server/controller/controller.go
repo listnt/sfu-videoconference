@@ -3,13 +3,13 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
-	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -39,8 +39,7 @@ type controller struct {
 	trackExtentionHeaders map[string]map[string]common.RtpExtentions
 	mu                    sync.Mutex
 
-	// experiments, delete when stable
-	// conn                  net.Conn
+	conn net.Conn
 }
 
 func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller {
@@ -59,14 +58,14 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 		panic(1)
 	}
 
-	// conn, _ := net.Dial("udp", "127.0.0.1:44444")
+	conn, _ := net.Dial("udp", "127.0.0.1:44444")
 
 	ctrl := &controller{
 		api:           api,
 		logger:        logger,
 		roomRepo:      roomRepo,
 		simulcastLock: cache,
-		// conn:          conn,
+		conn:          conn,
 	}
 
 	go func() {
@@ -279,26 +278,12 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 	ctrl.logger.Debug("track handler has been added", zap.String("roomId", msg.RoomId))
 
 	return func(t *webrtc.TrackRemote, reciever *webrtc.RTPReceiver) {
-		caps, _ := json.Marshal(reciever.GetParameters())
-		streamInfos := common.Collect(reciever.Encodings, func(s webrtc.TrackStreams) *interceptor.StreamInfo {
-			return s.StreamInfo
-		})
-
-		for _, s := range streamInfos {
-			if s == nil {
-				continue
-			}
-
-			fmt.Println(*s)
-		}
-
 		ctrl.logger.Info("track has been added",
 			zap.String("kind", t.Kind().String()),
 			zap.String("id", t.ID()),
 			zap.Uint32("ssrc", uint32(t.SSRC())),
 			zap.String("rid", t.RID()),
 			zap.Int("total tracks", len(reciever.Tracks())),
-			zap.String("capabilities", string(caps)),
 		)
 
 		// Create a track to fan out our incoming video to all peers
@@ -313,8 +298,11 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 			return
 		}
 
-		ctrl.roomRepo.AddTrack(peer.Id, trackLocal, msg.RoomId)
-		defer ctrl.roomRepo.RemoveTrack(trackLocal, msg.RoomId)
+		ctrl.roomRepo.AddTrack(peer.PeerConnection, trackLocal, msg.RoomId)
+		defer func() {
+			ctrl.roomRepo.RemoveTrack(trackLocal, msg.RoomId)
+			ctrl.removeTrackFromPeers(trackLocal, msg.RoomId)
+		}()
 
 		counter, ok := ctrl.simulcastLock.Get(t.ID())
 		if len(reciever.Tracks()) == 1 ||
@@ -344,8 +332,8 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 			}
 
 			// experiments, delete when stable
-			// b, _ := rtpPkt.Marshal()
-			// ctrl.conn.Write(b)
+			b, _ := rtpPkt.Marshal()
+			ctrl.conn.Write(b)
 		}
 	}
 }
@@ -372,9 +360,14 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 	updatedPeers := make([]updatePeerPair, 0)
 
 	for _, p := range peers {
+		if p.PeerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			continue
+		}
+
 		existingPeer := map[string][]string{}
 		for _, sender := range p.PeerConnection.GetSenders() {
 			if sender.Track() == nil {
+				p.PeerConnection.RemoveTrack(sender)
 				continue
 			}
 
@@ -400,7 +393,7 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			}
 
 			// Don't send track to self
-			if track.PeerId == p.Id {
+			if track.Peer.ID() == p.Id {
 				continue
 			}
 
@@ -421,17 +414,18 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			}
 		}
 
-		offer, err := p.PeerConnection.CreateOffer(nil)
-		if err != nil {
-			ctrl.logger.Error("failed to create offer", zap.Error(err))
-			continue
+		if p.PeerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			offer, err := p.PeerConnection.CreateOffer(nil)
+			if err != nil {
+				ctrl.logger.Error("failed to create offer", zap.Error(err))
+				continue
+			}
+
+			updatedPeers = append(updatedPeers, updatePeerPair{
+				p:     p,
+				offer: offer,
+			})
 		}
-
-		updatedPeers = append(updatedPeers, updatePeerPair{
-			p:     p,
-			offer: offer,
-		})
-
 	}
 
 	for _, p := range updatedPeers {
@@ -490,4 +484,47 @@ func (ctrl *controller) onConnectionChange(peer *common.Peer) func(state webrtc.
 
 		// return
 	}
+}
+
+func (ctrl *controller) removeTrackFromPeers(track *webrtc.TrackLocalStaticRTP, roomId string) {
+	peers := ctrl.roomRepo.GetPeers(roomId)
+	ctrl.logger.Info("removing track", zap.String("trackID", track.ID()))
+
+	for _, p := range peers {
+		if p.PeerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
+			continue
+		}
+
+		for _, sender := range p.PeerConnection.GetSenders() {
+			if sender.Track() == nil {
+				p.PeerConnection.RemoveTrack(sender)
+				continue
+			}
+
+			if sender.Track().ID() == track.ID() {
+				p.PeerConnection.RemoveTrack(sender)
+			}
+		}
+
+		offer, err := p.PeerConnection.CreateOffer(nil)
+		if err != nil {
+			ctrl.logger.Error("failed to create offer", zap.Error(err))
+			continue
+		}
+
+		offerString, err := json.Marshal(offer)
+		if err != nil {
+			ctrl.logger.Error("failed to marshal offer", zap.Error(err))
+			continue
+		}
+
+		if err := p.SendMsg(&Msg{
+			Type:   "offer",
+			Data:   string(offerString),
+			RoomId: roomId,
+		}); err != nil {
+			ctrl.logger.Error("failed to send offer", zap.Error(err))
+		}
+	}
+
 }

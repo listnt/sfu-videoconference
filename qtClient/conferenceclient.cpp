@@ -13,6 +13,13 @@ void ConferenceClient::connectClient(QString url, QString roomId)
     pc.onLocalCandidate(this->pcOnLocalCandidate());
     pc.onGatheringStateChange(this->pcOnGatheringStateChange());
 
+    pc.onIceStateChange([](rtc::PeerConnection::IceState state) {
+        std::cout << "Ice state changed: " << state << std::endl;
+    });
+    pc.onStateChange([](rtc::PeerConnection::State state) {
+        std::cout << "state changed: " << state << std::endl;
+    });
+
     ws.onOpen(this->wsOnOpen(roomId));
     ws.onMessage(this->wsOnMessage());
 
@@ -35,8 +42,8 @@ std::function<void(rtc::Description desc)> ConferenceClient::pcOnLocalDescriptio
         obj["roomId"] = roomId;
         obj["data"] = QString::fromStdString(
             QJsonDocument(session_desc).toJson(QJsonDocument::Compact).toStdString());
-
         const auto json = QJsonDocument(obj).toJson(QJsonDocument::Compact).toStdString();
+
         ws.send(json);
     };
 }
@@ -81,6 +88,7 @@ std::function<void(std::variant<rtc::binary, std::string> message)> ConferenceCl
         const QString dataStr = obj.value("data").toString();
 
         const std::string typeStd = typeStr.toStdString();
+        const std::regex re("m=.*\\n");
 
         switch (fnv1a_32(typeStd)) {
         case fnv1a_32("candidate"): {
@@ -121,6 +129,21 @@ std::function<void(std::variant<rtc::binary, std::string> message)> ConferenceCl
             rtc::Description desc(sdp.toStdString(), descType);
 
             if (typeStr == QLatin1String("offer")) {
+                std::cout << desc << std::endl;
+                for (int i = 0; i < desc.mediaCount(); i++) {
+                    try {
+                        auto m = std::get<rtc::Description::Media *>(desc.media(i));
+                        if (m->direction() == rtc::Description::Direction::Inactive) {
+                            if (auto t = this->track_index[m->mid()].track.lock()) {
+                                t->close();
+                                this->track_index.erase(m->mid());
+                            }
+                        }
+                    } catch (const std::bad_variant_access &ex) {
+                        std::cout << ex.what() << '\n';
+                    }
+                }
+
                 pc.setRemoteDescription(desc);
                 pc.setLocalDescription(rtc::Description::Type::Answer);
             } else {
@@ -199,6 +222,8 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         track->onFrame(this->trackOnFrame(mid, codec));
 
         track->onOpen([track]() { track->requestKeyframe(); });
+
+        track->onClosed([this, mid]() { this->player->destroy(mid); });
     };
 }
 

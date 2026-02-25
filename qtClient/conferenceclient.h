@@ -16,6 +16,7 @@
 
 #include <fstream>
 #include <functional>
+#include <regex>
 #include <utils.h>
 
 struct track_ptr

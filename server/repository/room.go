@@ -11,7 +11,7 @@ import (
 
 type RoomRepo interface {
 	JoinRoom(peer *common.Peer, room string)
-	AddTrack(peerId string, track *webrtc.TrackLocalStaticRTP, room string)
+	AddTrack(peer *webrtc.PeerConnection, track *webrtc.TrackLocalStaticRTP, room string)
 	LeaveRoom(peer *common.Peer, room string)
 	RemoveTrack(track webrtc.TrackLocal, room string)
 	GetPeers(room string) map[string]*common.Peer
@@ -35,8 +35,8 @@ type Room struct {
 }
 
 type Track struct {
-	Track  *webrtc.TrackLocalStaticRTP
-	PeerId string
+	Track *webrtc.TrackLocalStaticRTP
+	Peer  *webrtc.PeerConnection
 }
 
 func NewRoomRepo(logger *zap.Logger) RoomRepo {
@@ -73,13 +73,13 @@ func (repo *roomRepo) LeaveRoom(peer *common.Peer, room string) {
 	}
 }
 
-func (repo *roomRepo) AddTrack(peerId string, track *webrtc.TrackLocalStaticRTP, room string) {
+func (repo *roomRepo) AddTrack(peer *webrtc.PeerConnection, track *webrtc.TrackLocalStaticRTP, room string) {
 	repo.rooms[room].mu.Lock()
 	defer repo.rooms[room].mu.Unlock()
 
 	repo.rooms[room].tracks[track.ID()] = append(repo.rooms[room].tracks[track.ID()], Track{
-		Track:  track,
-		PeerId: peerId,
+		Track: track,
+		Peer:  peer,
 	})
 }
 

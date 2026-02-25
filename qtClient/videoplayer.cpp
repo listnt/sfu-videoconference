@@ -30,6 +30,7 @@ void videoPlayer::play(rtc::binary frame, rtc::FrameInfo info, std::string mid, 
                 std::cout << "contextnot found" << std::endl;
                 exit(1);
             }
+        
 
             if (avcodec_open2(this->frames[mid].c, this->frames[mid].codec, NULL) < 0) {
                 std::cout << "failed to open codec" << std::endl;
@@ -49,6 +50,7 @@ void videoPlayer::play(rtc::binary frame, rtc::FrameInfo info, std::string mid, 
                                   << std::endl;
                     }
                     std::cout << "blueprint created" << std::endl;
+                    this->rects[mid] = rect;
 
                     rect->setParent(this->videoArea);
 
@@ -116,6 +118,8 @@ void videoPlayer::decode(std::string mid)
         if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
             return;
 
+        // std::cout << this->frames[mid].frame->format << std::endl;
+
         QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
                                        this->frames[mid].frame->height),
                                  QVideoFrameFormat::PixelFormat::Format_YUV420P);
@@ -130,10 +134,21 @@ void videoPlayer::decode(std::string mid)
 
                 int size = this->frames[mid].frame->width * this->frames[mid].frame->height;
 
-                if (i == 0) {
-                    memcpy(dst, src, size);
-                } else {
-                    memcpy(dst, src, size >> 2);
+                if (frame.bytesPerLine(i) == this->frames[mid].frame->linesize[i]) {
+                    if (i == 0) {
+                        memcpy(dst, src, size);
+                    } else {
+                        memcpy(dst, src, size >> 2);
+                    }
+                } else { // fuking padding, have to copy line by line
+                    int dstStride = frame.bytesPerLine(i);
+                    int srcStride = this->frames[mid].frame->linesize[i];
+
+                    int bytesToCopy = qMin(dstStride, srcStride);
+
+                    for (int y = 0; y < frame.height(); y++) {
+                        memcpy(dst + (y * dstStride), src + (y * srcStride), bytesToCopy);
+                    }
                 }
             }
             frame.unmap();
@@ -141,4 +156,18 @@ void videoPlayer::decode(std::string mid)
 
         this->mp[mid]->setVideoFrame(frame);
     }
+}
+
+void videoPlayer::destroy(std::string mid)
+{
+    std::cout << "destroying track" << std::endl;
+    QMetaObject::invokeMethod(
+        this->app,
+        [this, mid]() {
+            this->mp[mid] = nullptr;
+            this->players[mid]->stop();
+            this->players[mid]->deleteLater();
+            this->rects[mid]->deleteLater();
+        },
+        Qt::BlockingQueuedConnection);
 }
