@@ -3,7 +3,6 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
@@ -38,8 +37,6 @@ type controller struct {
 	simulcastLock         *lru.ARCCache
 	trackExtentionHeaders map[string]map[string]common.RtpExtentions
 	mu                    sync.Mutex
-
-	conn net.Conn
 }
 
 func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller {
@@ -58,14 +55,11 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 		panic(1)
 	}
 
-	conn, _ := net.Dial("udp", "127.0.0.1:44444")
-
 	ctrl := &controller{
 		api:           api,
 		logger:        logger,
 		roomRepo:      roomRepo,
 		simulcastLock: cache,
-		conn:          conn,
 	}
 
 	go func() {
@@ -330,10 +324,6 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 			if err = trackLocal.WriteRTP(rtpPkt); err != nil {
 				return
 			}
-
-			// experiments, delete when stable
-			b, _ := rtpPkt.Marshal()
-			ctrl.conn.Write(b)
 		}
 	}
 }
