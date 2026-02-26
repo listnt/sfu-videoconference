@@ -336,9 +336,10 @@ func (ctrl *controller) onICEConnectionStateChange() func(is webrtc.ICEConnectio
 
 func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 	ctrl.roomRepo.LockRoom(room)
-	defer ctrl.roomRepo.UnlockRoom(room)
-
-	defer ctrl.dispatch(room)
+	defer func() {
+		ctrl.roomRepo.UnlockRoom(room)
+		ctrl.dispatch(room)
+	}()
 
 	peers := ctrl.roomRepo.GetPeers(room)
 
@@ -449,7 +450,6 @@ func (ctrl *controller) dispatch(room string) {
 			if reciever.Track() == nil {
 				continue
 			}
-
 			for _, track := range reciever.Tracks() {
 				_ = peer.PeerConnection.WriteRTCP([]rtcp.Packet{
 					&rtcp.PictureLossIndication{

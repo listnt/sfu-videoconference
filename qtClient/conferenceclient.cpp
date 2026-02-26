@@ -129,7 +129,6 @@ std::function<void(std::variant<rtc::binary, std::string> message)> ConferenceCl
             rtc::Description desc(sdp.toStdString(), descType);
 
             if (typeStr == QLatin1String("offer")) {
-                std::cout << desc << std::endl;
                 for (int i = 0; i < desc.mediaCount(); i++) {
                     try {
                         auto m = std::get<rtc::Description::Media *>(desc.media(i));
@@ -182,12 +181,6 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
     return [this](std::shared_ptr<rtc::Track> track) {
         std::cout << "track came, type=" << track->description().type() << std::endl;
 
-        // Only handle video tracks
-        if (track->description().type() != "video") {
-            std::cout << "ignoring non-video track" << std::endl;
-            return;
-        }
-
         // Choose depacketizer from SDP codec (first payload type's format)
         std::string codecFormat;
         auto payloadTypes = track->description().payloadTypes();
@@ -214,12 +207,24 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
         std::cout << std::endl;
         this->player->listen(mid);
 
-        std::string codec = "VP80"; // TODO replace with actual codec selection later
+        std::string codec;
+        bool isVideo = true;
 
-        track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
-        track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+        if (track->description().type() != "video") {
+            std::cout << "audio accepted" << std::endl;
+            codec = "OPUS"; // TODO replace with actual codec selection later
+            isVideo = false;
 
-        track->onFrame(this->trackOnFrame(mid, codec));
+            track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
+            track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+        } else {
+            std::cout << "video accepted" << std::endl;
+            codec = "VP80"; // TODO replace with actual codec selection later
+            track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
+            track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+        }
+
+        track->onFrame(this->trackOnFrame(mid, codec, isVideo));
 
         track->onOpen([track]() { track->requestKeyframe(); });
 
@@ -228,9 +233,10 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack()
 }
 
 std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid,
-                                                                                std::string codec)
+                                                                                std::string codec,
+                                                                                bool isVideo)
 {
-    return [this, mid, codec](rtc::binary frame, rtc::FrameInfo info) {
-        this->player->play(frame, info, mid, codec);
+    return [this, mid, codec, isVideo](rtc::binary frame, rtc::FrameInfo info) {
+        this->player->play(frame, info, mid, codec, isVideo);
     };
 }

@@ -1,8 +1,11 @@
 #ifndef VIDEOPLAYER_H
 #define VIDEOPLAYER_H
 
+#include <QAudioFormat>
+#include <QAudioSink>
 #include <QFile>
 #include <QGuiApplication>
+#include <QIODevice>
 #include <QImage>
 #include <QMediaPlayer>
 #include <QObject>
@@ -49,6 +52,8 @@ private:
 
     qint64 tmp;
     std::unordered_map<std::string, QMediaPlayer *> players;
+    std::unordered_map<std::string, QAudioSink *> audioSink;
+    std::unordered_map<std::string, QIODevice *> audioDevice;
     std::unordered_map<std::string, QVideoSink *> mp;
     std::unordered_map<std::string, QObject *> rects;
 
@@ -83,12 +88,14 @@ public:
         this->processed[mid] = new std::once_flag();
         this->frameInit[mid] = new std::once_flag();
         this->mp[mid] = nullptr;
+        this->audioSink[mid] = nullptr;
         this->rects[mid] = nullptr;
     };
 
     void destroy(std::string mid);
-    void play(rtc::binary frame, rtc::FrameInfo info, std::string mid, std::string codec);
-    void decode(std::string mid);
+    void play(
+        rtc::binary frame, rtc::FrameInfo info, std::string mid, std::string codec, bool isVideo);
+    void decode(std::string mid, bool isVideo);
 };
 
 #endif // VIDEOPLAYER_H

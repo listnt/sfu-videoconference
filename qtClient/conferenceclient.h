@@ -50,7 +50,8 @@ private:
     std::function<void(rtc::PeerConnection::GatheringState)> pcOnGatheringStateChange();
     std::function<void(std::shared_ptr<rtc::Track>)> pcOnTrack();
     std::function<void(rtc::binary, rtc::FrameInfo)> trackOnFrame(std::string mid,
-                                                                  std::string codec);
+                                                                  std::string codec,
+                                                                  bool isVideo);
 };
 
 #endif // CONFERENCECLIENT_H

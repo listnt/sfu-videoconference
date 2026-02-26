@@ -140,6 +140,11 @@
                 // ]
             })
 
+            const transiever2 = pc.addTransceiver(stream.getAudioTracks()[0], {
+                direction: 'sendonly',
+                streams: [stream],
+            })
+
             // transceiver.setCodecPreferences(vp9Codecs);
         }
 
