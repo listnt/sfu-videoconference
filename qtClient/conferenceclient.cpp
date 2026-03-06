@@ -259,7 +259,7 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
 
             if (frame.size() > 0) {
               this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
-              this->player->play(/*msg*/ frame, mid, "VP80", true);
+              this->player->play(frame, mid, "VP80", true);
             }
         } catch (std::exception &e) {
             std::cout << e.what() << std::endl;
