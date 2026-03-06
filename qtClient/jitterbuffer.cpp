@@ -55,7 +55,7 @@ std::vector<std::byte> jitterbuffer::addPacket(
   // do not, I repeat DO NOT consider them as valid
   uint8_t extensionByte = std::to_integer<uint8_t>(payloadData[1]);
   uint8_t pictureIdByte = std::to_integer<uint8_t>(payloadData[2]);
-  auto addPicId = std::to_integer<uint8_t>(payloadData[3]);
+  uint8_t addPicId = std::to_integer<uint8_t>(payloadData[3]);
 
   if (firstByte & X) {
     descriptorSize++;
@@ -112,6 +112,24 @@ std::vector<std::byte> jitterbuffer::addPacket(
       }
 
       this->isFormed = true;
+      if ((std::to_integer<uint8_t>(res[0]) & ((uint8_t)0b00000001)) == 0) {
+        std::cout << "frame size: " << res.size() << std::endl;
+        std::cout << std::bitset<8>(static_cast<unsigned char>(res[0]))
+                  << std::endl;
+
+        std::cout << std::bitset<8>(static_cast<unsigned char>(res[3])) << " "
+                  << std::bitset<8>(static_cast<unsigned char>(res[4])) << " "
+                  << std::bitset<8>(static_cast<unsigned char>(res[5]))
+                  << std::endl;
+
+        std::cout << std::bitset<8>(static_cast<unsigned char>(res[6])) << " "
+                  << std::bitset<8>(static_cast<unsigned char>(res[7]))
+                  << std::endl;
+
+        std::cout << std::bitset<8>(static_cast<unsigned char>(res[8])) << " "
+                  << std::bitset<8>(static_cast<unsigned char>(res[9]))
+                  << std::endl;
+      }
 
       return res;
     }

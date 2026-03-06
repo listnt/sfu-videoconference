@@ -224,10 +224,10 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
       std::cout << "video accepted" << std::endl;
       codec = "VP80"; // TODO replace with actual codec selection later
 
-      // track->onMessage(this->pcOnMessage(mid));
-      track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
-      track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-      track->onFrame(this->trackOnFrame(mid, codec, isVideo));
+      track->onMessage(this->pcOnMessage(mid));
+      // track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
+      // track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+      // track->onFrame(this->trackOnFrame(mid, codec, isVideo));
     }
 
     // track->onAvailable([track]() { track->requestKeyframe(); });
@@ -264,8 +264,9 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                     .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
 
             if (frame.size() > 0) {
-                this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
-                this->player->play(msg, mid, "VP80", true);
+              // std::cout << "frame size: " << frame.size() << std::endl;
+              this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
+              this->player->play(frame, mid, "VP80", true);
             }
         } catch (std::exception &e) {
             std::cout << e.what() << std::endl;
