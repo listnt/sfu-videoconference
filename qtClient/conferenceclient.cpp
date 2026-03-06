@@ -225,12 +225,8 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
       codec = "VP80"; // TODO replace with actual codec selection later
 
       track->onMessage(this->pcOnMessage(mid));
-      // track->setMediaHandler(std::make_shared<rtc::VP8RtpDepacketizer>());
-      // track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-      // track->onFrame(this->trackOnFrame(mid, codec, isVideo));
     }
 
-    // track->onAvailable([track]() { track->requestKeyframe(); });
     track->onOpen([track]() { track->requestKeyframe(); });
 
     track->onClosed([this, mid]() { this->player->destroy(mid); });
@@ -241,8 +237,6 @@ std::function<void(rtc::binary, rtc::FrameInfo)>
 ConferenceClient::trackOnFrame(std::string mid, std::string codec,
                                bool isVideo) {
   return [this, mid, codec, isVideo](rtc::binary frame, rtc::FrameInfo info) {
-    std::cout << std::bitset<8>(static_cast<unsigned char>(frame[0]))
-              << std::endl;
     this->player->play(frame, mid, codec, isVideo);
   };
 }
@@ -264,9 +258,8 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                     .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
 
             if (frame.size() > 0) {
-              // std::cout << "frame size: " << frame.size() << std::endl;
               this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
-              this->player->play(frame, mid, "VP80", true);
+              this->player->play(/*msg*/ frame, mid, "VP80", true);
             }
         } catch (std::exception &e) {
             std::cout << e.what() << std::endl;

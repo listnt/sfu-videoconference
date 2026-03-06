@@ -2,12 +2,6 @@
 
 void videoPlayer::play(rtc::binary frame, std::string mid, std::string codec, bool isVideo)
 {
-
-  // for keyframe
-  if ((std::to_integer<uint8_t>(frame[0]) & ((uint8_t)0b00000001)) == 0) {
-    std::cout << "frame size: " << frame.size() << std::endl;
-  }
-
   if (!this->mp[mid] && !this->audioSink[mid]) {
     std::call_once(*this->processed[mid], [this, mid, codec, isVideo]() {
       this->frames[mid] = {};
