@@ -10,6 +10,7 @@ import (
 type Peer struct {
 	Id             string
 	PeerConnection *webrtc.PeerConnection
+	RoomId         string
 	websocket      *SafeWebSocket
 	streams        map[string]*webrtc.TrackRemote
 }

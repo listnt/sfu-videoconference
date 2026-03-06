@@ -1,7 +1,6 @@
 #include "videoplayer.h"
 
-void videoPlayer::play(
-    rtc::binary frame, rtc::FrameInfo info, std::string mid, std::string codec, bool isVideo)
+void videoPlayer::play(rtc::binary frame, std::string mid, std::string codec, bool isVideo)
 {
     if (!this->mp[mid] && !this->audioSink[mid]) {
         std::call_once(*this->processed[mid], [this, mid, codec, isVideo]() {
@@ -118,102 +117,104 @@ void videoPlayer::play(
     }
 }
 
-void videoPlayer::decode(std::string mid, bool isVideo)
-{
-    auto ret = avcodec_send_packet(this->frames[mid].c, this->frames[mid].pkt);
-    if (ret < 0) {
-        char errbuf[256];
-        av_strerror(ret, errbuf, sizeof(errbuf));
-        std::cout << "error occured: " << ret << " " << errbuf << std::endl;
-    }
-    while (ret >= 0) {
-        ret = avcodec_receive_frame(this->frames[mid].c, this->frames[mid].frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-            return;
+void videoPlayer::decode(std::string mid, bool isVideo) {
+  auto ret = avcodec_send_packet(this->frames[mid].c, this->frames[mid].pkt);
+  if (ret < 0) {
+    char errbuf[256];
+    av_strerror(ret, errbuf, sizeof(errbuf));
+    std::cout << "error occured: " << ret << " " << errbuf << std::endl;
+  }
+  while (ret >= 0) {
+    ret = avcodec_receive_frame(this->frames[mid].c, this->frames[mid].frame);
+    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+      return;
 
-        if (isVideo) {
-            QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
-                                           this->frames[mid].frame->height),
-                                     QVideoFrameFormat::PixelFormat::Format_YUV420P);
+    if (isVideo) {
+      QVideoFrameFormat format(QSize(this->frames[mid].frame->width,
+                                     this->frames[mid].frame->height),
+                               QVideoFrameFormat::PixelFormat::Format_YUV420P);
 
-            QVideoFrame frame(format); // TODO, find a method for frame reuse
+      QVideoFrame frame(format); // TODO, find a method for frame reuse
 
-            if (frame.map(QVideoFrame::WriteOnly)) {
-                for (int i = 0; i < 3; ++i) {
-                    uint8_t *src = this->frames[mid].frame->data[i];
-                    uint8_t *dst = frame.bits(i);
+      if (frame.map(QVideoFrame::WriteOnly)) {
+        for (int i = 0; i < 3; ++i) {
+          uint8_t *src = this->frames[mid].frame->data[i];
+          uint8_t *dst = frame.bits(i);
 
-                    int size = this->frames[mid].frame->width * this->frames[mid].frame->height;
+          int size =
+              this->frames[mid].frame->width * this->frames[mid].frame->height;
 
-                    if (frame.bytesPerLine(i) == this->frames[mid].frame->linesize[i]) {
-                        if (i == 0) {
-                            memcpy(dst, src, size);
-                        } else {
-                            memcpy(dst, src, size >> 2);
-                        }
-                    } else { // fuking padding, have to copy line by line
-                        int dstStride = frame.bytesPerLine(i);
-                        int srcStride = this->frames[mid].frame->linesize[i];
-
-                        int planeHeight = (i == 0) ? frame.height() : frame.height() / 2;
-                        int bytesToCopy = qMin(dstStride, srcStride);
-
-                        for (int y = 0; y < planeHeight; y++) {
-                            memcpy(dst + (y * dstStride), src + (y * srcStride), bytesToCopy);
-                        }
-                    }
-                }
-                frame.unmap();
-            }
-
-            this->mp[mid]->setVideoFrame(frame);
-        } else {
-            int channels = this->frames[mid].c->channels;
-            int samplesPerChannel = this->frames[mid].frame->nb_samples;
-            int bytesPerSample = av_get_bytes_per_sample(
-                (AVSampleFormat) this->frames[mid].frame->format);
-
-            // std::cout << this->frames[mid].frame->format << std::endl;
-
-            if (!av_sample_fmt_is_planar((AVSampleFormat) this->frames[mid].frame->format)) {
-                this->audioDevice[mid]->write((const char *) this->frames[mid].frame->data[0],
-                                              samplesPerChannel * channels * bytesPerSample);
+          if (frame.bytesPerLine(i) == this->frames[mid].frame->linesize[i]) {
+            if (i == 0) {
+              memcpy(dst, src, size);
             } else {
-                QByteArray buffer;
-                buffer.reserve(samplesPerChannel * channels * bytesPerSample);
-
-                for (int i = 0; i < samplesPerChannel; ++i) {
-                    for (int ch = 0; ch < channels; ++ch) {
-                        uint8_t *ptr = this->frames[mid].frame->data[ch] + (i * bytesPerSample);
-                        buffer.append((const char *) ptr, bytesPerSample);
-                    }
-                }
-                this->audioDevice[mid]->write(buffer);
+              memcpy(dst, src, size >> 2);
             }
+          } else { // fuking padding, have to copy line by line
+            int dstStride = frame.bytesPerLine(i);
+            int srcStride = this->frames[mid].frame->linesize[i];
+
+            int planeHeight = (i == 0) ? frame.height() : frame.height() / 2;
+            int bytesToCopy = qMin(dstStride, srcStride);
+
+            for (int y = 0; y < planeHeight; y++) {
+              memcpy(dst + (y * dstStride), src + (y * srcStride), bytesToCopy);
+            }
+          }
         }
+        frame.unmap();
+      }
+
+      this->mp[mid]->setVideoFrame(frame);
+    } else {
+      int channels = this->frames[mid].c->channels;
+      int samplesPerChannel = this->frames[mid].frame->nb_samples;
+      int bytesPerSample = av_get_bytes_per_sample(
+          (AVSampleFormat)this->frames[mid].frame->format);
+
+      // std::cout << this->frames[mid].frame->format << std::endl;
+
+      if (!av_sample_fmt_is_planar(
+              (AVSampleFormat)this->frames[mid].frame->format)) {
+        this->audioDevice[mid]->write(
+            (const char *)this->frames[mid].frame->data[0],
+            samplesPerChannel * channels * bytesPerSample);
+      } else {
+        QByteArray buffer;
+        buffer.reserve(samplesPerChannel * channels * bytesPerSample);
+
+        for (int i = 0; i < samplesPerChannel; ++i) {
+          for (int ch = 0; ch < channels; ++ch) {
+            uint8_t *ptr =
+                this->frames[mid].frame->data[ch] + (i * bytesPerSample);
+            buffer.append((const char *)ptr, bytesPerSample);
+          }
+        }
+        this->audioDevice[mid]->write(buffer);
+      }
     }
+  }
 }
 
-void videoPlayer::destroy(std::string mid)
-{
-    std::cout << "destroying track" << std::endl;
-    QMetaObject::invokeMethod(
-        this->app,
-        [this, mid]() {
-            this->mp[mid] = nullptr;
+void videoPlayer::destroy(std::string mid) {
+  std::cout << "destroying track" << std::endl;
+  QMetaObject::invokeMethod(
+      this->app,
+      [this, mid]() {
+        this->mp[mid] = nullptr;
 
-            if (this->players[mid]) {
-                this->players[mid]->stop();
-                this->players[mid]->deleteLater();
-            }
+        if (this->players[mid]) {
+          this->players[mid]->stop();
+          this->players[mid]->deleteLater();
+        }
 
-            if (this->rects[mid]) {
-                this->rects[mid]->deleteLater();
-            }
+        if (this->rects[mid]) {
+          this->rects[mid]->deleteLater();
+        }
 
-            if (this->audioSink[mid]) {
-                this->audioSink[mid]->deleteLater();
-            }
-        },
-        Qt::BlockingQueuedConnection);
+        if (this->audioSink[mid]) {
+          this->audioSink[mid]->deleteLater();
+        }
+      },
+      Qt::BlockingQueuedConnection);
 }

@@ -1,10 +1,12 @@
+#include "conferenceclient.h"
+#include "videoplayer.h"
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QVideoFrame>
 #include <QVideoSink>
-#include "conferenceclient.h"
-#include "videoplayer.h"
+
+#include <cmath>
 
 void initVideoPlayers(QGuiApplication &app,
                       QQmlApplicationEngine &engine,
@@ -18,16 +20,14 @@ void initVideoPlayers(QGuiApplication &app,
     webrtcClient->SetVideoArea(player);
 }
 
-void initWebRtcClient(QGuiApplication &app, QQmlApplicationEngine &engine)
-{
-    ConferenceClient *client = new ConferenceClient();
-    engine.rootContext()->setContextProperty("conference_client", client);
+void initWebRtcClient(QGuiApplication &app, QQmlApplicationEngine &engine) {
+  ConferenceClient *client = new ConferenceClient();
+  engine.rootContext()->setContextProperty("conference_client", client);
 
-    initVideoPlayers(app, engine, client);
+  initVideoPlayers(app, engine, client);
 }
 
-int main(int argc, char *argv[])
-{
+int main(int argc, char *argv[]) {
     QGuiApplication app(argc, argv);
 
     QQmlApplicationEngine engine;

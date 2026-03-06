@@ -3,12 +3,11 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
+	"github.com/pion/interceptor"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -33,10 +32,6 @@ type controller struct {
 
 	roomRepo repository.RoomRepo
 	api      *webrtc.API
-
-	simulcastLock         *lru.ARCCache
-	trackExtentionHeaders map[string]map[string]common.RtpExtentions
-	mu                    sync.Mutex
 }
 
 func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller {
@@ -44,26 +39,28 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 	settingEngine.SetAnsweringDTLSRole(webrtc.DTLSRoleServer)
 	mediaEngine := &webrtc.MediaEngine{}
 	mediaEngine.RegisterDefaultCodecs()
+	interseporRegistry := interceptor.Registry{}
+
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, &interseporRegistry); err != nil {
+		logger.Error("failed to register interceptor", zap.Error(err))
+
+		panic(err)
+	}
+
 	api := webrtc.NewAPI(
 		webrtc.WithMediaEngine(mediaEngine),
 		webrtc.WithSettingEngine(settingEngine),
+		webrtc.WithInterceptorRegistry(&interseporRegistry),
 	)
 
-	cache, err := lru.NewARC(128)
-	if err != nil {
-		logger.Error("failed to create cache", zap.Error(err))
-		panic(1)
-	}
-
 	ctrl := &controller{
-		api:           api,
-		logger:        logger,
-		roomRepo:      roomRepo,
-		simulcastLock: cache,
+		api:      api,
+		logger:   logger,
+		roomRepo: roomRepo,
 	}
 
 	go func() {
-		ticker := time.NewTicker(3 * time.Second)
+		ticker := time.NewTicker(2 * time.Second)
 		for _ = range ticker.C {
 			roomIds := ctrl.roomRepo.GetRooms()
 			for _, roomId := range roomIds {
@@ -196,6 +193,8 @@ func (ctrl *controller) JoinRoom(peer *common.Peer, msg Msg) error {
 		return fmt.Errorf("room id is empty")
 	}
 
+	peer.RoomId = msg.RoomId
+
 	ctrl.roomRepo.JoinRoom(peer, msg.RoomId)
 
 	peer.PeerConnection.OnICECandidate(ctrl.onICECandidate(peer, msg))
@@ -298,13 +297,7 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 			ctrl.removeTrackFromPeers(trackLocal, msg.RoomId)
 		}()
 
-		counter, ok := ctrl.simulcastLock.Get(t.ID())
-		if len(reciever.Tracks()) == 1 ||
-			(ok &&
-				(counter.(int)+1 == len(reciever.Tracks()))) { // simulcast
-			go ctrl.signalRoom(peer, msg.RoomId)
-		}
-		ctrl.simulcastLock.Add(t.ID(), 1)
+		go ctrl.signalRoom(peer, msg.RoomId)
 
 		buf := make([]byte, 1500)
 
@@ -336,10 +329,7 @@ func (ctrl *controller) onICEConnectionStateChange() func(is webrtc.ICEConnectio
 
 func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 	ctrl.roomRepo.LockRoom(room)
-	defer func() {
-		ctrl.roomRepo.UnlockRoom(room)
-		ctrl.dispatch(room)
-	}()
+	defer ctrl.roomRepo.UnlockRoom(room)
 
 	peers := ctrl.roomRepo.GetPeers(room)
 
@@ -388,6 +378,11 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 				continue
 			}
 
+			// skip full resolution
+			if track.Track.RID() == "f" {
+				continue
+			}
+
 			// if no sender is found, create a new one
 			ctrl.logger.Info("adding track to new sender",
 				zap.String("trackId", track.Track.ID()),
@@ -403,6 +398,16 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			if t == nil {
 				continue
 			}
+
+			go func() {
+				_, _, err := t.Sender().ReadRTCP()
+				if err != nil {
+					ctrl.logger.Error("failed to read RTCP", zap.Error(err))
+					return
+				}
+
+				ctrl.dispatch(room)
+			}()
 		}
 
 		if p.PeerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
@@ -439,24 +444,28 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			ctrl.logger.Error("failed to send offer", zap.Error(err))
 		}
 	}
-
 }
 
 func (ctrl *controller) dispatch(room string) {
 	peers := ctrl.roomRepo.GetPeers(room)
 
 	for _, peer := range peers {
+		packets := make([]rtcp.Packet, 0, 0)
 		for _, reciever := range peer.PeerConnection.GetReceivers() {
-			if reciever.Track() == nil {
-				continue
-			}
 			for _, track := range reciever.Tracks() {
-				_ = peer.PeerConnection.WriteRTCP([]rtcp.Packet{
-					&rtcp.PictureLossIndication{
-						MediaSSRC: uint32(track.SSRC()),
-					},
+				packets = append(packets, &rtcp.PictureLossIndication{
+					MediaSSRC: uint32(track.SSRC()),
 				})
 			}
+		}
+
+		if len(packets) == 0 {
+			continue
+		}
+
+		err := peer.PeerConnection.WriteRTCP(packets)
+		if err != nil {
+			ctrl.logger.Error("failed to send rtcp packet", zap.Error(err))
 		}
 	}
 }
