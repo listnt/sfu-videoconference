@@ -26,6 +26,7 @@ struct track_ptr {
     std::int64_t lastCompletedTs = 0;
     std::int16_t lastCompletedSeqNum = 0;
     std::optional<LRUCache<std::int32_t, jitterbuffer>> buff;
+    float framerate_estimation = 30.0;
 };
 
 class ConferenceClient : public QObject {

@@ -55,7 +55,8 @@ std::vector<std::byte> jitterbuffer::addPacket(
   // do not, I repeat DO NOT consider them as valid
   uint8_t extensionByte = std::to_integer<uint8_t>(payloadData[1]);
   uint8_t pictureIdByte = std::to_integer<uint8_t>(payloadData[2]);
-  uint8_t addPicId = std::to_integer<uint8_t>(payloadData[3]);
+  uint8_t addPicId = std::
+      to_integer<uint8_t>(payloadData[3]); // valid only in case if M bit is set
 
   if (firstByte & X) {
     descriptorSize++;
@@ -81,34 +82,43 @@ std::vector<std::byte> jitterbuffer::addPacket(
   if (firstByte & S) {
     if ((firstByte & pid) == 0) {
       this->isFirstPresent = true;
-      this->firstSeqNum = rtpHeader->seqNumber();
     }
   }
 
   if (rtpHeader->marker()) {
     this->isLastPresent = true;
-    this->lastSeqNum = rtpHeader->seqNumber();
   }
+
+  std::uint16_t dist = 0;
+  if (this->_data.size() == 0) {
+    this->firstSeqNum = rtpHeader->seqNumber();
+  } else {
+    dist = rtpHeader->seqNumber() - this->firstSeqNum;
+    this->firstSeqNum = ((rtpHeader->seqNumber() < this->firstSeqNum) &&
+                         (dist < std::numeric_limits<std::uint16_t>::max() / 2))
+                            ? rtpHeader->seqNumber()
+                            : this->firstSeqNum;
+  }
+
+  this->lenght = (dist > this->lenght) ? dist : this->lenght;
 
   this->_data[rtpHeader->seqNumber()] = std::
       vector<std::byte>(payloadData, payloadData + payloadSize);
 
   if (this->isFirstPresent && this->isLastPresent) {
-    std::uint16_t dist = this->lastSeqNum - this->firstSeqNum;
-    if (this->_data.size() == dist + 1) {
+    if (this->_data.size() == this->lenght + 1) {
       std::vector<std::byte> res;
       std::int64_t totalSize = 0;
 
-      for (std::uint16_t i = this->firstSeqNum; i != this->lastSeqNum + 1;
-           i++) {
-        totalSize += this->_data[i].size();
+      for (std::uint16_t i = 0; i <= this->lenght; i++) {
+        totalSize += this->_data[this->firstSeqNum + i].size();
       }
 
       res.reserve(totalSize);
 
-      for (std::uint16_t i = this->firstSeqNum; i != this->lastSeqNum + 1;
-           i++) {
-        res.insert(res.end(), this->_data[i].begin(), this->_data[i].end());
+      for (std::uint16_t i = 0; i <= this->lenght; i++) {
+        auto idx = this->firstSeqNum + i;
+        res.insert(res.end(), this->_data[idx].begin(), this->_data[idx].end());
       }
 
       this->isFormed = true;
@@ -119,3 +129,65 @@ std::vector<std::byte> jitterbuffer::addPacket(
 
   return {};
 }
+
+std::vector<std::uint32_t> jitterbuffer::getPacketsToNack() {
+  if (this->isFormed) {
+    return {};
+  }
+
+  std::deque<std::uint16_t> missingSequence;
+
+  auto now = std::chrono::system_clock::now();
+  auto duration = now.time_since_epoch();
+  auto nowInMs = std::chrono::duration_cast<std::chrono::milliseconds>(duration)
+                     .count();
+
+  if (nowInMs - this->decoding_started_ts > 150) {
+    for (std::uint16_t i = 0; i <= this->lenght; i++) {
+      auto idx = this->firstSeqNum + i;
+      if (!this->_data.contains(idx)) {
+        missingSequence.push_back(idx);
+      }
+    }
+
+    if (!this->isFirstPresent && !missingSequence.empty()) {
+      std::uint16_t startVal =
+          static_cast<std::uint16_t>(missingSequence.front());
+      for (std::uint16_t i = 1; i <= 16; i++) {
+        missingSequence.push_front(startVal - i);
+      }
+    }
+
+    if (!this->isLastPresent && !missingSequence.empty()) {
+      std::uint16_t endVal = static_cast<std::uint16_t>(missingSequence.back());
+      for (std::uint16_t i = 1; i <= 16; i++) {
+        missingSequence.push_back(endVal + i);
+      }
+    }
+  }
+
+  if (missingSequence.size() == 0) {
+    return {};
+  }
+
+  std::uint16_t pid = missingSequence.front();
+  std::uint16_t blp = 0;
+  std::vector<std::uint32_t> nacks;
+
+  for (size_t i = 1; i < missingSequence.size(); i++) {
+    std::uint16_t dist = missingSequence[i] - pid;
+
+    if (dist > 16) {
+      nacks.push_back((std::uint32_t)pid << 16 | blp);
+
+      pid = missingSequence[i];
+      blp = 0;
+    } else {
+      blp |= (1 << (dist - 1));
+    }
+  }
+  nacks.push_back((std::uint32_t)pid << 16 | blp);
+
+  return nacks;
+}
+

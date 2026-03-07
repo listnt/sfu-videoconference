@@ -225,6 +225,7 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
       codec = "VP80"; // TODO replace with actual codec selection later
 
       track->onMessage(this->pcOnMessage(mid));
+      track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
     }
 
     track->onOpen([track]() { track->requestKeyframe(); });
@@ -243,27 +244,29 @@ ConferenceClient::trackOnFrame(std::string mid, std::string codec,
 
 std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid)
 {
-    return [mid, this](rtc::message_variant message) {
-        try {
-            auto msg = std::get<rtc::binary>(message);
-            auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
+  return [this, mid](rtc::message_variant message) {
+    try {
+      auto msg = std::get<rtc::binary>(message);
+      auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
 
-            if (!this->track_index[mid].buff.value().exist(rtpHeader->timestamp())) {
-                this->track_index[mid].buff.value().put(rtpHeader->timestamp(), jitterbuffer());
-            }
-            auto frame =
-                this->track_index[mid]
-                    .buff.value()
-                    .get(rtpHeader->timestamp()) // assertion may fail
-                    .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
+      if (!this->track_index[mid].buff.value().exist(rtpHeader->timestamp())) {
+        this->track_index[mid]
+            .buff.value()
+            .put(rtpHeader->timestamp(), jitterbuffer());
+      }
+      auto frame =
+          this->track_index[mid]
+              .buff.value()
+              .get(rtpHeader->timestamp()) // assertion may fail
+              .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
 
-            if (frame.size() > 0) {
-              this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
-              this->player->play(frame, mid, "VP80", true);
-            }
-        } catch (std::exception &e) {
-            std::cout << e.what() << std::endl;
-            return;
-        }
-    };
+      if (frame.size() > 0) {
+        this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
+        this->player->play(frame, mid, "VP80", true);
+      }
+    } catch (std::exception &e) {
+      std::cout << e.what() << std::endl;
+      return;
+    }
+  };
 }
