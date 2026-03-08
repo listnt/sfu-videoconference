@@ -14,7 +14,7 @@
 template <class KEY_T, class VAL_T> class LRUCache {
 private:
     std::list<std::pair<KEY_T, VAL_T>> item_list;
-    std::unordered_map<KEY_T, decltype(item_list.begin())> item_map;
+    std::map<KEY_T, decltype(item_list.begin())> item_map;
     size_t cache_size;
 
 private:
@@ -52,16 +52,17 @@ public:
     };
 };
 
-class jitterbuffer {
-  std::map<std::int16_t, std::vector<std::byte>> _data;
+class jitterbuffer
+{
+    std::map<std::int16_t, std::vector<std::byte>> _data;
 
-  std::int64_t decoding_started_ts = 0;
+    std::int64_t decoding_started_ts = 0;
 
-  std::uint16_t lenght = 0;
-  std::uint16_t firstSeqNum = 0;
-  bool isFirstPresent = false;
-  bool isLastPresent = false;
-  bool isFormed = false;
+    std::uint16_t firstSeqNum = 0;
+    std::uint16_t lenght = 0;
+    bool isFirstPresent = false;
+    bool isLastPresent = false;
+    bool isFormed = false;
 
 public:
     std::vector<std::byte> addPacket(std::vector<std::byte> pkg, std::int16_t prevMarkedPkg);

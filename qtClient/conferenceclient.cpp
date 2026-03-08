@@ -179,94 +179,112 @@ ConferenceClient::pcOnGatheringStateChange() {
 }
 
 std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
-  return [this](std::shared_ptr<rtc::Track> track) {
-    std::cout << "track came, type=" << track->description().type()
-              << std::endl;
+    return [this](std::shared_ptr<rtc::Track> track) {
+        std::cout << "track came, type=" << track->description().type() << std::endl;
 
-    // Choose depacketizer from SDP codec (first payload type's format)
-    std::string codecFormat;
-    auto payloadTypes = track->description().payloadTypes();
-    if (!payloadTypes.empty()) {
-      if (const auto *rtpMap = track->description().rtpMap(payloadTypes[0]))
-        codecFormat = rtpMap->format;
-    }
+        // Choose depacketizer from SDP codec (first payload type's format)
+        std::string codecFormat;
+        auto payloadTypes = track->description().payloadTypes();
+        if (!payloadTypes.empty()) {
+            if (const auto *rtpMap = track->description().rtpMap(payloadTypes[0]))
+                codecFormat = rtpMap->format;
+        }
 
-    auto mid = track->description().mid();
+        auto mid = track->description().mid();
 
-    this->track_index[mid] = {track, 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
+        this->track_index[mid] = {track, 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
 
-    std::cout << "mid: " << mid << "\n rid: " << std::endl;
-    std::cout << "ssrc: ";
-    for (auto p : track->description().getSSRCs()) {
-      std::cout << p << " ";
-    }
-    std::cout << std::endl;
+        std::cout << "mid: " << mid << "\n rid: " << std::endl;
+        std::cout << "ssrc: ";
+        for (auto p : track->description().getSSRCs()) {
+            std::cout << p << " ";
+        }
+        std::cout << std::endl;
 
-    std::cout << "attributes: ";
-    for (auto p : track->description().attributes()) {
-      std::cout << " " << p << "\n";
-    }
-    std::cout << std::endl;
-    this->player->listen(mid);
+        std::cout << "attributes: ";
+        for (auto p : track->description().attributes()) {
+            std::cout << " " << p << "\n";
+        }
+        std::cout << std::endl;
+        this->player->listen(mid);
 
-    std::string codec;
-    bool isVideo = true;
+        std::string codec;
+        bool isVideo = true;
 
-    if (track->description().type() != "video") {
-      std::cout << "audio accepted" << std::endl;
-      codec = "OPUS"; // TODO replace with actual codec selection later
-      isVideo = false;
+        if (track->description().type() != "video") {
+            std::cout << "audio accepted" << std::endl;
+            codec = "OPUS"; // TODO replace with actual codec selection later
+            isVideo = false;
 
-      track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
-      track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-      track->onFrame(this->trackOnFrame(mid, codec, isVideo));
-    } else {
-      std::cout << "video accepted" << std::endl;
-      codec = "VP80"; // TODO replace with actual codec selection later
+            track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
+            track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
+            track->onFrame(this->trackOnFrame(mid, codec, isVideo));
+        } else {
+            std::cout << "video accepted" << std::endl;
+            codec = "VP80"; // TODO replace with actual codec selection later
 
-      track->onMessage(this->pcOnMessage(mid));
-      track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
-    }
+            track->onMessage(this->pcOnMessage(mid));
+            // track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
+        }
 
-    track->onOpen([track]() { track->requestKeyframe(); });
+        track->onOpen([track]() { track->requestKeyframe(); });
 
-    track->onClosed([this, mid]() { this->player->destroy(mid); });
-  };
+        track->onClosed([this, mid]() { this->player->destroy(mid); });
+    };
 }
 
 std::function<void(rtc::binary, rtc::FrameInfo)>
 ConferenceClient::trackOnFrame(std::string mid, std::string codec,
                                bool isVideo) {
-  return [this, mid, codec, isVideo](rtc::binary frame, rtc::FrameInfo info) {
-    this->player->play(frame, mid, codec, isVideo);
-  };
+    return [this, mid, codec, isVideo](rtc::binary frame, rtc::FrameInfo info) {
+        this->player->play(frame, mid, codec, isVideo);
+    };
 }
 
 std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid)
 {
-  return [this, mid](rtc::message_variant message) {
-    try {
-      auto msg = std::get<rtc::binary>(message);
-      auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
+    return [this, mid](rtc::message_variant message) {
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        auto nowTs = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
-      if (!this->track_index[mid].buff.value().exist(rtpHeader->timestamp())) {
-        this->track_index[mid]
-            .buff.value()
-            .put(rtpHeader->timestamp(), jitterbuffer());
-      }
-      auto frame =
-          this->track_index[mid]
-              .buff.value()
-              .get(rtpHeader->timestamp()) // assertion may fail
-              .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
+        try {
+            auto msg = std::get<rtc::binary>(message);
+            auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
 
-      if (frame.size() > 0) {
-        this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
-        this->player->play(frame, mid, "VP80", true);
-      }
-    } catch (std::exception &e) {
-      std::cout << e.what() << std::endl;
-      return;
-    }
-  };
+            if (!this->track_index[mid].buff.value().exist(rtpHeader->timestamp())) {
+                this->track_index[mid].buff.value().put(rtpHeader->timestamp(), jitterbuffer());
+
+                this->track_index[mid].frame_queue[rtpHeader->timestamp()]
+                    = std::make_pair(nowTs, std::vector<std::byte>());
+            }
+
+            auto frame = this->track_index[mid]
+                             .buff.value()
+                             .get(rtpHeader->timestamp()) // assertion may fail
+                             .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
+
+            if (frame.size() > 0) {
+                this->track_index[mid].frame_queue[rtpHeader->timestamp()].second = frame;
+                this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
+            }
+        } catch (std::exception &e) {
+            std::cout << e.what() << std::endl;
+            return;
+        }
+
+        if (!this->track_index[mid].frame_queue.empty()) {
+            auto it = this->track_index[mid].frame_queue.begin();
+            auto &[rtpTs, dataPair] = *it;
+            auto &[creationTs, frame] = dataPair;
+
+            if (!frame.empty()) {
+                this->player->play(frame, mid, "VP80", true);
+                this->track_index[mid].frame_queue.erase(it);
+            } else if (nowTs - creationTs > 150) {
+                auto savedPackets = this->track_index[mid].buff.value().get(rtpTs);
+                this->track_index[mid].frame_queue.erase(it);
+            }
+        }
+    };
 }
