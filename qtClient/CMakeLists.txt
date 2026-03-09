@@ -26,7 +26,7 @@ qt_add_qml_module(appqtClient
         SOURCES utils.h utils.cpp
         SOURCES constants.h
         SOURCES jitterbuffer.h jitterbuffer.cpp
-        SOURCES vp8utils.h vp8utils.cpp
+        SOURCES
         SOURCES lrucache.h
 )
 
