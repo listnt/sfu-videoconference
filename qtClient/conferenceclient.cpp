@@ -259,12 +259,16 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                     = std::make_pair(nowTs, std::vector<std::byte>());
             }
 
-            auto frame = this->track_index[mid]
-                             .buff.value()
-                             .get(rtpHeader->timestamp()) // assertion may fail
-                             .addPacket(msg, this->track_index[mid].lastCompletedSeqNum);
+            auto buff = this->track_index[mid].buff.value().get(
+                rtpHeader->timestamp()); // assertion may fail
+
+            auto frame = buff.addVp8Packet(msg, this->track_index[mid].lastCompletedSeqNum);
 
             if (frame.size() > 0) {
+                if (buff.isKeyFrame()) {
+                    this->track_index[mid].frame_queue.clear();
+                }
+
                 this->track_index[mid].frame_queue[rtpHeader->timestamp()].second = frame;
                 this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
             }

@@ -2,6 +2,7 @@
 #define CONFERENCECLIENT_H
 #include "constants.h"
 #include "jitterbuffer.h"
+#include "lrucache.h"
 #include "rtc/rtc.hpp"
 #include "videoplayer.h"
 

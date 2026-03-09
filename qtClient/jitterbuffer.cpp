@@ -1,7 +1,7 @@
 #include "jitterbuffer.h"
 
-std::vector<std::byte> jitterbuffer::addPacket(std::vector<std::byte> pkg,
-                                               std::int16_t prevMarkedPkg)
+std::vector<std::byte> jitterbuffer::addVp8Packet(std::vector<std::byte> pkg,
+                                                  std::int16_t prevMarkedPkg)
 {
     if (this->decoding_started_ts == 0) {
         auto now = std::chrono::system_clock::now();
@@ -133,6 +133,17 @@ std::vector<std::byte> jitterbuffer::addPacket(std::vector<std::byte> pkg,
     }
 
     return {};
+}
+
+bool jitterbuffer::isKeyFrame()
+{
+    if (!this->isFirstPresent) {
+        return false;
+    }
+
+    return (((std::uint8_t) 0b00000001)
+            & std::to_integer<uint8_t>(this->_data[this->firstSeqNum][0]))
+           == 0;
 }
 
 std::vector<std::uint32_t> jitterbuffer::getPacketsToNack() {
