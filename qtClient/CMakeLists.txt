@@ -25,9 +25,6 @@ qt_add_qml_module(appqtClient
         SOURCES
         SOURCES utils.h utils.cpp
         SOURCES constants.h
-        SOURCES jitterbuffer.h jitterbuffer.cpp
-        SOURCES
-        SOURCES lrucache.h
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -57,6 +54,7 @@ target_link_libraries(appqtClient
 
 target_include_directories(appqtClient PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libdatachannel/src"
 )
 
 target_compile_definitions(appqtClient PRIVATE WEBRTC_POSIX WEBRTC_LINUX)

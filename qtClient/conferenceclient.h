@@ -1,8 +1,8 @@
 #ifndef CONFERENCECLIENT_H
 #define CONFERENCECLIENT_H
 #include "constants.h"
-#include "jitterbuffer.h"
-#include "lrucache.h"
+#include "impl/lrucache.hpp"
+#include "rtc/jitterbuffer.hpp"
 #include "rtc/rtc.hpp"
 #include "videoplayer.h"
 
