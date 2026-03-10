@@ -276,6 +276,7 @@ func (ctrl *controller) onTrack(peer *common.Peer, msg Msg) func(t *webrtc.Track
 			zap.String("id", t.ID()),
 			zap.Uint32("ssrc", uint32(t.SSRC())),
 			zap.String("rid", t.RID()),
+			zap.String("codec", t.Codec().MimeType),
 			zap.Int("total tracks", len(reciever.Tracks())),
 		)
 

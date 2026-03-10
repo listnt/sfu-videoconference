@@ -3,99 +3,96 @@
 void videoPlayer::play(rtc::binary frame, std::string mid, std::string codec, bool isVideo)
 {
   if (!this->mp[mid] && !this->audioSink[mid]) {
-    std::call_once(*this->processed[mid], [this, mid, codec, isVideo]() {
-      this->frames[mid] = {};
+      std::call_once(*this->processed[mid], [this, mid, codec, isVideo]() {
+          this->frames[mid] = {};
 
-      if (codec == "VP90") {
-        std::cout << "ffmpeg player initialized with codec VP9" << std::endl;
-        this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP9);
-      } else if (codec == "VP80") {
-        std::cout << "ffmpeg player initialized with codec VP8" << std::endl;
-        this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP8);
-      } else if (codec == "OPUS") {
-        this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
-      }
+          if (codec == MyApp::VP9CODEC) {
+              std::cout << "ffmpeg player initialized with codec VP9" << std::endl;
+              this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP9);
+          } else if (codec == MyApp::VP8CODEC) {
+              std::cout << "ffmpeg player initialized with codec VP8" << std::endl;
+              this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_VP8);
+          } else if (codec == "OPUS") {
+              this->frames[mid].codec = avcodec_find_decoder(AV_CODEC_ID_OPUS);
+          }
 
-      if (!this->frames[mid].codec) {
-        std::cout << "codec not found" << codec << std::endl;
-        exit(1);
-      }
+          if (!this->frames[mid].codec) {
+              std::cout << "codec not found" << codec << std::endl;
+              exit(1);
+          }
 
-      this->frames[mid].parser = av_parser_init(this->frames[mid].codec->id);
-      if (!this->frames[mid].parser) {
-        std::cout << "parser not found" << std::endl;
-        exit(1);
-      }
+          this->frames[mid].parser = av_parser_init(this->frames[mid].codec->id);
+          if (!this->frames[mid].parser) {
+              std::cout << "parser not found" << std::endl;
+              exit(1);
+          }
 
-      this->frames[mid].c = avcodec_alloc_context3(this->frames[mid].codec);
-      if (!this->frames[mid].c) {
-        std::cout << "contextnot found" << std::endl;
-        exit(1);
-      }
+          this->frames[mid].c = avcodec_alloc_context3(this->frames[mid].codec);
+          if (!this->frames[mid].c) {
+              std::cout << "contextnot found" << std::endl;
+              exit(1);
+          }
 
-      if (avcodec_open2(this->frames[mid].c, this->frames[mid].codec, NULL) <
-          0) {
-        std::cout << "failed to open codec" << std::endl;
-        exit(1);
-      }
+          if (avcodec_open2(this->frames[mid].c, this->frames[mid].codec, NULL) < 0) {
+              std::cout << "failed to open codec" << std::endl;
+              exit(1);
+          }
 
-      this->frames[mid].frame = av_frame_alloc();
-      this->frames[mid].pkt = av_packet_alloc();
+          this->frames[mid].frame = av_frame_alloc();
+          this->frames[mid].pkt = av_packet_alloc();
 
-      QMetaObject::invokeMethod(
-          this->app,
-          [this, mid, isVideo]() {
-            std::cout << "Creating element" << std::endl;
+          QMetaObject::invokeMethod(
+              this->app,
+              [this, mid, isVideo]() {
+                  std::cout << "Creating element" << std::endl;
 
-            if (isVideo) {
-              QObject *rect = this->videoBlueprint.create();
-              if (!this->videoBlueprint.errors().empty()) {
-                std::cout << "ERROR"
-                          << this->videoBlueprint.errorString().toStdString()
-                          << std::endl;
-              }
-              std::cout << "blueprint created" << std::endl;
-              this->rects[mid] = rect;
+                  if (isVideo) {
+                      QObject *rect = this->videoBlueprint.create();
+                      if (!this->videoBlueprint.errors().empty()) {
+                          std::cout << "ERROR" << this->videoBlueprint.errorString().toStdString()
+                                    << std::endl;
+                      }
+                      std::cout << "blueprint created" << std::endl;
+                      this->rects[mid] = rect;
 
-              rect->setParent(this->videoArea);
+                      rect->setParent(this->videoArea);
 
-              QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
-              if (!rectVisual) {
-                std::abort();
-              }
-              QQuickItem *videoAreaVisual =
-                  qobject_cast<QQuickItem *>(this->videoArea);
-              if (!videoAreaVisual) {
-                std::abort();
-              }
+                      QQuickItem *rectVisual = qobject_cast<QQuickItem *>(rect);
+                      if (!rectVisual) {
+                          std::abort();
+                      }
+                      QQuickItem *videoAreaVisual = qobject_cast<QQuickItem *>(this->videoArea);
+                      if (!videoAreaVisual) {
+                          std::abort();
+                      }
 
-              rectVisual->setParentItem(videoAreaVisual);
+                      rectVisual->setParentItem(videoAreaVisual);
 
-              auto voutput = rect->findChild<QObject *>(
-                  "videoOutput", Qt::FindChildrenRecursively);
+                      auto voutput = rect->findChild<QObject *>("videoOutput",
+                                                                Qt::FindChildrenRecursively);
 
-              auto sink = voutput->property("videoSink").value<QVideoSink *>();
+                      auto sink = voutput->property("videoSink").value<QVideoSink *>();
 
-              this->players[mid] = new QMediaPlayer();
-              this->mp[mid] = sink;
-              this->players[mid]->setVideoOutput(voutput);
-              this->players[mid]->play();
-            } else {
-              QAudioFormat format;
-              format.setSampleRate(48000);
-              format.setChannelCount(2);
-              format.setSampleFormat(QAudioFormat::Float);
+                      this->players[mid] = new QMediaPlayer();
+                      this->mp[mid] = sink;
+                      this->players[mid]->setVideoOutput(voutput);
+                      this->players[mid]->play();
+                  } else {
+                      QAudioFormat format;
+                      format.setSampleRate(48000);
+                      format.setChannelCount(2);
+                      format.setSampleFormat(QAudioFormat::Float);
 
-              QAudioSink *audioSink = new QAudioSink(format);
-              audioSink->setVolume(0.1);
-              this->audioSink[mid] = audioSink;
-              this->audioDevice[mid] = audioSink->start();
-            }
+                      QAudioSink *audioSink = new QAudioSink(format);
+                      audioSink->setVolume(0.1);
+                      this->audioSink[mid] = audioSink;
+                      this->audioDevice[mid] = audioSink->start();
+                  }
 
-            std::cout << "Element created" << std::endl;
-          },
-          Qt::BlockingQueuedConnection);
-    });
+                  std::cout << "Element created" << std::endl;
+              },
+              Qt::BlockingQueuedConnection);
+      });
   }
 
     auto start = reinterpret_cast<const uint8_t *>(frame.data());

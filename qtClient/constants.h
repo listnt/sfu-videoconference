@@ -4,8 +4,8 @@
 
 namespace MyApp {
 const std::string AppName = "stupid_shit";
-const std::string VP8CODEC = "VP80";
-const std::string VP9CODEC = "VP90";
+const std::string VP8CODEC = "VP8";
+const std::string VP9CODEC = "VP9";
 } // namespace MyApp
 
 #endif // CONSTANTS_H

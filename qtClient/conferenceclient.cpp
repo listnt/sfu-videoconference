@@ -180,54 +180,35 @@ ConferenceClient::pcOnGatheringStateChange() {
 
 std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
     return [this](std::shared_ptr<rtc::Track> track) {
-        std::cout << "track came, type=" << track->description().type() << std::endl;
-
-        // Choose depacketizer from SDP codec (first payload type's format)
-        std::string codecFormat;
-        auto payloadTypes = track->description().payloadTypes();
-        if (!payloadTypes.empty()) {
-            if (const auto *rtpMap = track->description().rtpMap(payloadTypes[0]))
-                codecFormat = rtpMap->format;
-        }
-
         auto mid = track->description().mid();
 
-        this->track_index[mid] = {track, 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
+        this->track_index[mid] = {track, "NO_VALUE", 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
 
-        std::cout << "mid: " << mid << "\n rid: " << std::endl;
+        std::cout << "track came, type=" << track->description().type();
+        std::cout << "\nmid: " << mid << "\nrid: ";
         std::cout << "ssrc: ";
         for (auto p : track->description().getSSRCs()) {
             std::cout << p << " ";
         }
         std::cout << std::endl;
 
-        std::cout << "attributes: ";
+        std::cout << "attributes:\n";
         for (auto p : track->description().attributes()) {
             std::cout << " " << p << "\n";
         }
-        std::cout << std::endl;
+
         this->player->listen(mid);
 
-        std::string codec;
         bool isVideo = true;
 
         if (track->description().type() != "video") {
-            std::cout << "audio accepted" << std::endl;
-            codec = "OPUS"; // TODO replace with actual codec selection later
             isVideo = false;
 
             track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
             track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
-            track->onFrame(this->trackOnFrame(mid, codec, isVideo));
+            track->onFrame(this->trackOnFrame(mid, isVideo));
         } else {
-            std::cout << "video accepted " << codecFormat << std::endl;
-            if (codecFormat == "VP8") {
-                codec = MyApp::VP8CODEC;
-            } else if (codecFormat == "VP9") {
-                codec = MyApp::VP9CODEC;
-            }
-
-            track->onMessage(this->pcOnMessage(mid, codec));
+            track->onMessage(this->pcOnMessage(mid));
             // track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
         }
 
@@ -237,63 +218,74 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
     };
 }
 
-std::function<void(rtc::binary, rtc::FrameInfo)>
-ConferenceClient::trackOnFrame(std::string mid, std::string codec,
-                               bool isVideo) {
-    return [this, mid, codec, isVideo](rtc::binary frame, rtc::FrameInfo info) {
+std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(std::string mid,
+                                                                                bool isVideo)
+{
+    return [this, mid, isVideo](rtc::binary frame, rtc::FrameInfo info) {
+        auto track = this->track_index[mid].track.lock();
+        auto PT = info.payloadType;
+        auto codec = track->description().rtpMap(PT)->format;
+        std::cout << PT << " " << codec << std::endl;
+
         this->player->play(frame, mid, codec, isVideo);
     };
 }
 
-std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid,
-                                                                        std::string codec)
+std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid)
 {
-    return [this, mid, codec](rtc::message_variant message) {
+    return [this, mid](rtc::message_variant message) {
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
         auto nowTs = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 
+        std::string &codec = this->track_index[mid].codec;
+        auto &track_info = this->track_index[mid];
+        auto &frame_cache = this->track_index[mid].buff.value();
+
         try {
             auto msg = std::get<rtc::binary>(message);
             auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
-
-            if (!this->track_index[mid].buff.value().exist(rtpHeader->timestamp())) {
-                this->track_index[mid].buff.value().put(rtpHeader->timestamp(), jitterbuffer());
-
-                this->track_index[mid].frame_queue[rtpHeader->timestamp()]
-                    = std::make_pair(nowTs, std::vector<std::byte>());
-            }
-
-            jitterbuffer &buff = this->track_index[mid].buff.value().get(rtpHeader->timestamp());
+            std::uint32_t pkgTs = rtpHeader->timestamp();
 
             std::vector<std::byte> frame;
 
+            if (!frame_cache.exist(pkgTs)) {
+                frame_cache.put(pkgTs, jitterbuffer());
+
+                track_info.frame_queue[pkgTs] = std::make_pair(nowTs, std::vector<std::byte>());
+
+                auto track = track_info.track.lock();
+                auto PT = rtpHeader->payloadType();
+                codec = track->description().rtpMap(PT)->format;
+            }
+
+            jitterbuffer &buff = frame_cache.get(pkgTs);
+
             if (codec == MyApp::VP9CODEC) {
-                frame = buff.addVp9Packet(msg, this->track_index[mid].lastCompletedSeqNum);
+                frame = buff.addVp9Packet(msg, track_info.lastCompletedSeqNum);
             } else if (codec == MyApp::VP8CODEC) {
-                frame = buff.addVp8Packet(msg, this->track_index[mid].lastCompletedSeqNum);
+                frame = buff.addVp8Packet(msg, track_info.lastCompletedSeqNum);
             }
 
             if (frame.size() > 0) {
-                this->track_index[mid].frame_queue[rtpHeader->timestamp()].second = frame;
-                this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
+                track_info.frame_queue[pkgTs].second = frame;
+                track_info.lastCompletedTs = pkgTs;
             }
         } catch (std::exception &e) {
             std::cout << e.what() << std::endl;
             return;
         }
 
-        if (!this->track_index[mid].frame_queue.empty()) {
-            auto it = this->track_index[mid].frame_queue.begin();
+        if (!track_info.frame_queue.empty()) {
+            auto it = track_info.frame_queue.begin();
             auto &[rtpTs, dataPair] = *it;
             auto &[creationTs, frame] = dataPair;
 
             if (!frame.empty()) {
-                this->player->play(frame, mid, "VP80", true);
-                this->track_index[mid].frame_queue.erase(it);
+                this->player->play(frame, mid, codec, true);
+                track_info.frame_queue.erase(it);
             } else if (nowTs - creationTs > 150) {
-                auto savedPackets = this->track_index[mid].buff.value().get(rtpTs);
-                this->track_index[mid].frame_queue.erase(it);
+                track_info.frame_queue.erase(it);
             }
         }
     };

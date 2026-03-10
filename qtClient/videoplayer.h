@@ -1,6 +1,8 @@
 #ifndef VIDEOPLAYER_H
 #define VIDEOPLAYER_H
 
+#include "constants.h"
+
 #include <QAudioFormat>
 #include <QAudioSink>
 #include <QFile>
