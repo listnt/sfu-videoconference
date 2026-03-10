@@ -264,7 +264,7 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                     = std::make_pair(nowTs, std::vector<std::byte>());
             }
 
-            auto buff = this->track_index[mid].buff.value().get(rtpHeader->timestamp());
+            jitterbuffer &buff = this->track_index[mid].buff.value().get(rtpHeader->timestamp());
 
             std::vector<std::byte> frame;
 
@@ -275,11 +275,6 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             }
 
             if (frame.size() > 0) {
-                std::cout << "palying frame, framge ws forming: "
-                          << nowTs
-                                 - this->track_index[mid].frame_queue[rtpHeader->timestamp()].first
-                          << std::endl;
-
                 this->track_index[mid].frame_queue[rtpHeader->timestamp()].second = frame;
                 this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
             }
@@ -299,8 +294,6 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             } else if (nowTs - creationTs > 150) {
                 auto savedPackets = this->track_index[mid].buff.value().get(rtpTs);
                 this->track_index[mid].frame_queue.erase(it);
-                std::cout << "deleting frame, framge ws forming: " << nowTs - creationTs
-                          << " size: " << frame.size() << std::endl;
             }
         }
     };
