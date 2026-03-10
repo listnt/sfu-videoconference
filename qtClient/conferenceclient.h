@@ -58,7 +58,7 @@ private:
   std::function<void(std::shared_ptr<rtc::Track>)> pcOnTrack();
   std::function<void(rtc::binary, rtc::FrameInfo)>
   trackOnFrame(std::string mid, std::string codec, bool isVideo);
-  std::function<void(rtc::message_variant)> pcOnMessage(std::string mid);
+  std::function<void(rtc::message_variant)> pcOnMessage(std::string mid, std::string codec);
 };
 
 #endif // CONFERENCECLIENT_H

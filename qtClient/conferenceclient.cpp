@@ -220,10 +220,14 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
             track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
             track->onFrame(this->trackOnFrame(mid, codec, isVideo));
         } else {
-            std::cout << "video accepted" << std::endl;
-            codec = "VP80"; // TODO replace with actual codec selection later
+            std::cout << "video accepted " << codecFormat << std::endl;
+            if (codecFormat == "VP8") {
+                codec = MyApp::VP8CODEC;
+            } else if (codecFormat == "VP9") {
+                codec = MyApp::VP9CODEC;
+            }
 
-            track->onMessage(this->pcOnMessage(mid));
+            track->onMessage(this->pcOnMessage(mid, codec));
             // track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
         }
 
@@ -241,9 +245,10 @@ ConferenceClient::trackOnFrame(std::string mid, std::string codec,
     };
 }
 
-std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid)
+std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::string mid,
+                                                                        std::string codec)
 {
-    return [this, mid](rtc::message_variant message) {
+    return [this, mid, codec](rtc::message_variant message) {
         auto now = std::chrono::system_clock::now();
         auto duration = now.time_since_epoch();
         auto nowTs = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
@@ -259,15 +264,21 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                     = std::make_pair(nowTs, std::vector<std::byte>());
             }
 
-            auto buff = this->track_index[mid].buff.value().get(
-                rtpHeader->timestamp()); // assertion may fail
+            auto buff = this->track_index[mid].buff.value().get(rtpHeader->timestamp());
 
-            auto frame = buff.addVp8Packet(msg, this->track_index[mid].lastCompletedSeqNum);
+            std::vector<std::byte> frame;
+
+            if (codec == MyApp::VP9CODEC) {
+                frame = buff.addVp9Packet(msg, this->track_index[mid].lastCompletedSeqNum);
+            } else if (codec == MyApp::VP8CODEC) {
+                frame = buff.addVp8Packet(msg, this->track_index[mid].lastCompletedSeqNum);
+            }
 
             if (frame.size() > 0) {
-                if (buff.isKeyFrame()) {
-                    this->track_index[mid].frame_queue.clear();
-                }
+                std::cout << "palying frame, framge ws forming: "
+                          << nowTs
+                                 - this->track_index[mid].frame_queue[rtpHeader->timestamp()].first
+                          << std::endl;
 
                 this->track_index[mid].frame_queue[rtpHeader->timestamp()].second = frame;
                 this->track_index[mid].lastCompletedTs = rtpHeader->timestamp();
@@ -288,6 +299,8 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             } else if (nowTs - creationTs > 150) {
                 auto savedPackets = this->track_index[mid].buff.value().get(rtpTs);
                 this->track_index[mid].frame_queue.erase(it);
+                std::cout << "deleting frame, framge ws forming: " << nowTs - creationTs
+                          << " size: " << frame.size() << std::endl;
             }
         }
     };
