@@ -1,4 +1,5 @@
 #include "conferenceclient.h"
+#include <netinet/in.h>
 
 typedef int SOCKET;
 
@@ -188,11 +189,6 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
 
         std::cout << "track came, type=" << track->description().type();
         std::cout << "\nmid: " << mid << "\nrid: ";
-        std::cout << "/nssrc: ";
-        for (auto p : track->description().getSSRCs()) {
-            std::cout << p << " ";
-        }
-        std::cout << std::endl;
 
         std::cout << "attributes:\n";
         for (auto p : track->description().attributes()) {
@@ -203,7 +199,7 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
 
         bool isVideo = true;
 
-        if (track->description().type() != "video") {
+        if (track->description().type() == "audio") {
             isVideo = false;
 
             track->setMediaHandler(std::make_shared<rtc::OpusRtpDepacketizer>());
@@ -261,6 +257,19 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 codec = track->description().rtpMap(PT)->format;
             }
 
+            if (rtpHeader->payloadType() != 98) {
+                auto osn = reinterpret_cast<std::uint16_t *>(msg.data() + 4);
+
+                std::cout << (int) rtpHeader->payloadType() << std::endl;
+                std::cout << track_info.track.lock()
+                                 ->description()
+                                 .rtpMap((int) rtpHeader->payloadType())
+                                 ->format
+                          << std::endl;
+                ;
+                std::cout << std::bitset<16>(*osn) << std::endl;
+            }
+
             jitterbuffer &buff = frame_cache.get(pkgTs);
 
             if (codec == MyApp::VP9CODEC) {
@@ -298,6 +307,7 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 requestCounter = jitterbuffer.nackRequested;
                 if (requestCounter > NACK_MAX_TRIES) {
                     track_info.frame_queue.erase(it);
+                    return;
                 }
 
                 auto nacks = jitterbuffer.getPacketsToNack();
@@ -309,6 +319,9 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 auto header = rtc::RtcpFbHeader{};
                 header.setMediaSourceSSRC(track_info.ssrc);
                 header.setPacketSenderSSRC(track_info.ssrc);
+                std::cout << "Ts:" << nowTs - creationTs << "\nseqNumber: " << nacks[0].pid()
+                          << "\n"
+                          << std::bitset<16>(nacks[0].pid()) << std::endl;
                 header.header.prepareHeader(205, 1, 2 + uint16_t(nacks.size()));
                 header.header._first |= (std::uint8_t) 0b00000001;
 
@@ -318,10 +331,13 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 msg.insert(msg.end(), headerPtr, headerPtr + sizeof(header));
 
                 const std::byte *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
-                const int dataSize = nacks.size() * sizeof(std::uint32_t);
+                const int dataSize = nacks.size() * sizeof(rtc::RtcpNackPart);
                 msg.insert(msg.end(), dataPtr, dataPtr + dataSize);
 
                 auto track = track_info.track.lock();
+                std::cout << "sent: " << msg.size() << " bytes" << "\nconsisting of: " << dataSize
+                          << " data bytes" << "\nand " << sizeof(header) << " header bytes"
+                          << std::endl;
                 track->send(msg.data(), msg.size());
                 jitterbuffer.nackRequested++;
             }

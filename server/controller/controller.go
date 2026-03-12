@@ -401,13 +401,25 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			}
 
 			go func() {
-				_, _, err := t.Sender().ReadRTCP()
+				var pkt []rtcp.Packet
+
+				pkt, _, err := t.Sender().ReadRTCP()
 				if err != nil {
 					ctrl.logger.Error("failed to read RTCP", zap.Error(err))
 					return
 				}
 
 				ctrl.dispatch(room)
+
+				for {
+					ctrl.logger.Info("recieved rtcp", zap.Any("pkt", pkt))
+
+					pkt, _, err = t.Sender().ReadRTCP()
+					if err != nil {
+						ctrl.logger.Error("failed to read RTCP", zap.Error(err))
+						return
+					}
+				}
 			}()
 		}
 
