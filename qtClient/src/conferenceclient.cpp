@@ -310,14 +310,16 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 header.setMediaSourceSSRC(track_info.ssrc);
                 header.setPacketSenderSSRC(track_info.ssrc);
                 header.header.prepareHeader(205, 1, 2 + uint16_t(nacks.size()));
+                header.header._first |= (std::uint8_t) 0b00000001;
+
                 const auto *headerPtr = reinterpret_cast<const std::byte *>(&header);
 
                 std::vector<std::byte> msg;
-
                 msg.insert(msg.end(), headerPtr, headerPtr + sizeof(header));
-                const auto *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
 
-                msg.insert(msg.end(), dataPtr, dataPtr + nacks.size() * sizeof(std::uint32_t));
+                const std::byte *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
+                const int dataSize = nacks.size() * sizeof(std::uint32_t);
+                msg.insert(msg.end(), dataPtr, dataPtr + dataSize);
 
                 auto track = track_info.track.lock();
                 track->send(msg.data(), msg.size());
