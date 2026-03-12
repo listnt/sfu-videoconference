@@ -11,20 +11,18 @@ find_package(Qt6 REQUIRED COMPONENTS Quick Multimedia)
 qt_standard_project_setup(REQUIRES 6.8)
 
 qt_add_executable(appqtClient
-    main.cpp
+    src/main.cpp
 )
 
 qt_add_qml_module(appqtClient
     URI qtClient
     VERSION 1.0
-    QML_FILES
-        Main.qml
-        SOURCES conferenceclient.h conferenceclient.cpp
-        SOURCES videoplayer.h videoplayer.cpp
-        QML_FILES SmallVideoRect.qml
-        SOURCES
-        SOURCES utils.h utils.cpp
-        SOURCES constants.h
+    QML_FILES qml/Main.qml
+    QML_FILES qml/SmallVideoRect.qml
+    SOURCES src/conferenceclient.h src/conferenceclient.cpp
+    SOURCES src/videoplayer.h src/videoplayer.cpp
+    SOURCES src/utils.h src/utils.cpp
+    SOURCES src/constants.h
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.

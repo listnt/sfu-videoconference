@@ -4,6 +4,7 @@
 #include "impl/lrucache.hpp"
 #include "rtc/jitterbuffer.hpp"
 #include "rtc/rtc.hpp"
+#include "utils.h"
 #include "videoplayer.h"
 
 #include <QObject>
@@ -18,10 +19,10 @@
 #include <fstream>
 #include <functional>
 #include <regex>
-#include <utils.h>
 
 struct track_ptr {
     std::weak_ptr<rtc::Track> track;
+    std::uint32_t ssrc = 0;
     std::string codec;
     // for video only
     std::int64_t lastCompletedTs = 0;
@@ -58,6 +59,7 @@ private:
   std::function<void(std::shared_ptr<rtc::Track>)> pcOnTrack();
   std::function<void(rtc::binary, rtc::FrameInfo)> trackOnFrame(std::string mid, bool isVideo);
   std::function<void(rtc::message_variant)> pcOnMessage(std::string mid);
+  void enforceNackPolicy(std::string mid);
 };
 
 #endif // CONFERENCECLIENT_H

@@ -1,0 +1,104 @@
+#ifndef VIDEOPLAYER_H
+#define VIDEOPLAYER_H
+
+#include "constants.h"
+
+#include <QAudioFormat>
+#include <QAudioSink>
+#include <QFile>
+#include <QGuiApplication>
+#include <QIODevice>
+#include <QImage>
+#include <QMediaPlayer>
+#include <QObject>
+#include <QQmlApplicationEngine>
+#include <QQmlComponent>
+#include <QQuickItem>
+#include <QVideoFrame>
+#include <QVideoFrameFormat>
+#include <QVideoSink>
+
+#include "rtc/rtc.hpp"
+#include "utils.h"
+#include <cstdio>
+#include <iostream>
+#include <mutex>
+
+#ifdef __linux__
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavformat/avio.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/mem.h>
+}
+struct decoder {
+  AVCodec *codec;
+  AVCodecParserContext *parser;
+  AVCodecContext *c;
+  AVFrame *frame;
+  AVPacket *pkt;
+};
+
+#elif _WIN32
+#endif
+
+class videoPlayer
+{
+private:
+    QQmlApplicationEngine *engine;
+    QGuiApplication *app;
+
+    QObject *videoArea;
+
+    QQmlComponent videoBlueprint;
+
+    std::unordered_map<std::string, QMediaPlayer *> players;
+    std::unordered_map<std::string, QAudioSink *> audioSink;
+    std::unordered_map<std::string, QIODevice *> audioDevice;
+    std::unordered_map<std::string, QVideoSink *> mp;
+    std::unordered_map<std::string, QObject *> rects;
+
+    std::unordered_map<std::string, QVideoFrame *> qFrames;
+    std::unordered_map<std::string, std::once_flag *> frameInit;
+
+    std::unordered_map<std::string, std::once_flag *> processed;
+
+    int focusVideo = 2;
+
+#ifdef __linux__
+    std::unordered_map<std::string, decoder> frames;
+#elif _WIN32
+#endif
+
+    void setupDecoder(std::string mid, std::string codec, bool isVideo);
+    void setupVisuals(std::string mid, bool isVideo);
+
+public:
+    videoPlayer(QObject *videoArea, QQmlApplicationEngine *engine, QGuiApplication *app)
+        : videoArea(videoArea)
+        , engine(engine)
+        , videoBlueprint(engine)
+        , app(app)
+    {
+        videoBlueprint.loadFromModule("qtClient", "SmallVideoRect");
+        if (!videoBlueprint.isError()) {
+            std::cout << videoBlueprint.errorString().toStdString() << std::endl;
+        }
+    };
+
+    void listen(std::string mid)
+    {
+        this->processed[mid] = new std::once_flag();
+        this->frameInit[mid] = new std::once_flag();
+        this->mp[mid] = nullptr;
+        this->audioSink[mid] = nullptr;
+        this->rects[mid] = nullptr;
+    };
+
+    void destroy(std::string mid);
+    void play(rtc::binary frame, std::string mid, std::string codec, bool isVideo);
+    void decode(std::string mid, bool isVideo);
+};
+
+#endif // VIDEOPLAYER_H

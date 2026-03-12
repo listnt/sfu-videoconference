@@ -5,26 +5,27 @@ typedef int SOCKET;
 using rtc::binary;
 using rtc::string;
 
-void ConferenceClient::connectClient(QString url, QString roomId) {
-  rtc::InitLogger(rtc::LogLevel::Debug);
+void ConferenceClient::connectClient(QString url, QString roomId)
+{
+    rtc::InitLogger(rtc::LogLevel::Debug);
 
-  pc.onLocalDescription(this->pcOnLocalDescription(roomId));
-  pc.onLocalCandidate(this->pcOnLocalCandidate());
-  pc.onGatheringStateChange(this->pcOnGatheringStateChange());
+    pc.onLocalDescription(this->pcOnLocalDescription(roomId));
+    pc.onLocalCandidate(this->pcOnLocalCandidate());
+    pc.onGatheringStateChange(this->pcOnGatheringStateChange());
 
-  pc.onIceStateChange([](rtc::PeerConnection::IceState state) {
-    std::cout << "Ice state changed: " << state << std::endl;
-  });
-  pc.onStateChange([](rtc::PeerConnection::State state) {
-    std::cout << "state changed: " << state << std::endl;
-  });
+    pc.onIceStateChange([](rtc::PeerConnection::IceState state) {
+        std::cout << "Ice state changed: " << state << std::endl;
+    });
+    pc.onStateChange([](rtc::PeerConnection::State state) {
+        std::cout << "state changed: " << state << std::endl;
+    });
 
-  ws.onOpen(this->wsOnOpen(roomId));
-  ws.onMessage(this->wsOnMessage());
+    ws.onOpen(this->wsOnOpen(roomId));
+    ws.onMessage(this->wsOnMessage());
 
-  pc.onTrack(this->pcOnTrack());
+    pc.onTrack(this->pcOnTrack());
 
-  ws.open(url.toStdString());
+    ws.open(url.toStdString());
 }
 
 std::function<void(rtc::Description desc)>
@@ -182,11 +183,12 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
     return [this](std::shared_ptr<rtc::Track> track) {
         auto mid = track->description().mid();
 
-        this->track_index[mid] = {track, "NO_VALUE", 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
+        this->track_index[mid]
+            = {track, 0, "NO_VALUE", 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
 
         std::cout << "track came, type=" << track->description().type();
         std::cout << "\nmid: " << mid << "\nrid: ";
-        std::cout << "ssrc: ";
+        std::cout << "/nssrc: ";
         for (auto p : track->description().getSSRCs()) {
             std::cout << p << " ";
         }
@@ -213,7 +215,6 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
         }
 
         track->onOpen([track]() { track->requestKeyframe(); });
-
         track->onClosed([this, mid]() { this->player->destroy(mid); });
     };
 }
@@ -225,7 +226,6 @@ std::function<void(rtc::binary, rtc::FrameInfo)> ConferenceClient::trackOnFrame(
         auto track = this->track_index[mid].track.lock();
         auto PT = info.payloadType;
         auto codec = track->description().rtpMap(PT)->format;
-        std::cout << PT << " " << codec << std::endl;
 
         this->player->play(frame, mid, codec, isVideo);
     };
@@ -252,10 +252,12 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             if (!frame_cache.exist(pkgTs)) {
                 frame_cache.put(pkgTs, jitterbuffer());
 
+                track_info.ssrc = rtpHeader->ssrc();
                 track_info.frame_queue[pkgTs] = std::make_pair(nowTs, std::vector<std::byte>());
 
                 auto track = track_info.track.lock();
                 auto PT = rtpHeader->payloadType();
+
                 codec = track->description().rtpMap(PT)->format;
             }
 
@@ -281,12 +283,47 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             auto &[rtpTs, dataPair] = *it;
             auto &[creationTs, frame] = dataPair;
 
+            if (!track_info.buff->exist(rtpTs)) {
+                track_info.frame_queue.erase(it);
+                return;
+            }
+            auto &jitterbuffer = track_info.buff->get(rtpTs);
+
+            auto requestCounter = 999; // just some arbitrary big number
+
             if (!frame.empty()) {
                 this->player->play(frame, mid, codec, true);
                 track_info.frame_queue.erase(it);
-            } else if (nowTs - creationTs > 150) {
-                track_info.frame_queue.erase(it);
+            } else if (nowTs - creationTs > NACK_TIMEOUT_MS * (jitterbuffer.nackRequested + 1)) {
+                requestCounter = jitterbuffer.nackRequested;
+                if (requestCounter > NACK_MAX_TRIES) {
+                    track_info.frame_queue.erase(it);
+                }
+
+                auto nacks = jitterbuffer.getPacketsToNack();
+                if (nacks.size() == 0) {
+                    jitterbuffer.nackRequested++;
+                    return;
+                }
+
+                auto header = rtc::RtcpFbHeader{};
+                header.setMediaSourceSSRC(track_info.ssrc);
+                header.setPacketSenderSSRC(track_info.ssrc);
+                header.header.prepareHeader(205, 1, 2 + uint16_t(nacks.size()));
+                const auto *headerPtr = reinterpret_cast<const std::byte *>(&header);
+
+                std::vector<std::byte> msg;
+
+                msg.insert(msg.end(), headerPtr, headerPtr + sizeof(header));
+                const auto *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
+
+                msg.insert(msg.end(), dataPtr, dataPtr + nacks.size() * sizeof(std::uint32_t));
+
+                auto track = track_info.track.lock();
+                track->send(msg.data(), msg.size());
+                jitterbuffer.nackRequested++;
             }
         }
+       
     };
 }

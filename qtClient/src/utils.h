@@ -3,6 +3,7 @@
 
 #include <QDebug>
 #include <QProcess>
+#include <rtc/rtc.hpp>
 
 // Write 32-bit little-endian
 void write_u32_le(std::stringbuf &ofs, uint32_t v);
@@ -44,5 +45,10 @@ std::ostream &operator<<(std::ostream &out, const std::vector<T> &v) {
   }
   return out;
 }
+
+struct RtcpNack
+{
+    rtc::RtcpFbHeader fbHeader;
+};
 
 #endif // UTILS_H
