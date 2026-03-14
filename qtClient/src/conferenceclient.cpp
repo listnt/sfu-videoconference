@@ -25,7 +25,6 @@ void ConferenceClient::connectClient(QString url, QString roomId)
     ws.onMessage(this->wsOnMessage());
 
     pc.onTrack(this->pcOnTrack());
-
     ws.open(url.toStdString());
 }
 
@@ -184,8 +183,7 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
     return [this](std::shared_ptr<rtc::Track> track) {
         auto mid = track->description().mid();
 
-        this->track_index[mid]
-            = {track, 0, "NO_VALUE", 0, 0, LRUCache<std::int32_t, jitterbuffer>(128)};
+        this->track_index[mid] = {track, 0, "NO_VALUE", 0, LRUCache<std::int32_t, jitterbuffer>(128)};
 
         std::cout << "track came, type=" << track->description().type();
         std::cout << "\nmid: " << mid << "\nrid: ";
@@ -194,6 +192,7 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
         for (auto p : track->description().attributes()) {
             std::cout << " " << p << "\n";
         }
+        std::cout << track->description().rtpMap(99)->fmtps << std::endl;
 
         this->player->listen(mid);
 
@@ -206,6 +205,7 @@ std::function<void(std::shared_ptr<rtc::Track>)> ConferenceClient::pcOnTrack() {
             track->chainMediaHandler(std::make_shared<rtc::RtcpReceivingSession>());
             track->onFrame(this->trackOnFrame(mid, isVideo));
         } else {
+            // std::cout << track->description().generateSdp() << std::endl;
             track->onMessage(this->pcOnMessage(mid));
             // track->setMediaHandler(std::make_shared<rtc::RtcpNackResponder>());
         }
@@ -236,51 +236,56 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
 
         std::string &codec = this->track_index[mid].codec;
         auto &track_info = this->track_index[mid];
+        auto track = track_info.track.lock();
         auto &frame_cache = this->track_index[mid].buff.value();
 
         try {
             auto msg = std::get<rtc::binary>(message);
-            auto rtpHeader = reinterpret_cast<const rtc::RtpHeader *>(msg.data());
+
+            auto rtpHeader = reinterpret_cast<rtc::RtpHeader *>(msg.data());
+            auto PT = rtpHeader->payloadType();
+
+            if (track->description().rtpMap(PT)->format == MyApp::Rtx) {
+                auto osnPos = msg.begin() + rtpHeader->getSize()
+                              + rtpHeader->getExtensionHeaderSize();
+                std::uint16_t osn = ((uint8_t) *(osnPos)) | ((uint8_t) (*(osnPos + 1)) << 8);
+
+                std::cout << (int) rtpHeader->payloadType() << std::endl;
+
+                rtpHeader->_seqNumber = osn;
+                rtpHeader->_payloadType = 98;
+                std::cout << "seqNumber retransmiteed: " << rtpHeader->seqNumber() << std::endl;
+
+                msg.erase(osnPos, osnPos + 2);
+            }
+
             std::uint32_t pkgTs = rtpHeader->timestamp();
+            if (pkgTs < track_info.lastCompletedTs) {
+                std::cout << "THROWN AWAY" << std::endl;
+
+                return;
+            }
 
             std::vector<std::byte> frame;
-
             if (!frame_cache.exist(pkgTs)) {
                 frame_cache.put(pkgTs, jitterbuffer());
 
                 track_info.ssrc = rtpHeader->ssrc();
                 track_info.frame_queue[pkgTs] = std::make_pair(nowTs, std::vector<std::byte>());
 
-                auto track = track_info.track.lock();
-                auto PT = rtpHeader->payloadType();
-
                 codec = track->description().rtpMap(PT)->format;
-            }
-
-            if (rtpHeader->payloadType() != 98) {
-                auto osn = reinterpret_cast<std::uint16_t *>(msg.data() + 4);
-
-                std::cout << (int) rtpHeader->payloadType() << std::endl;
-                std::cout << track_info.track.lock()
-                                 ->description()
-                                 .rtpMap((int) rtpHeader->payloadType())
-                                 ->format
-                          << std::endl;
-                ;
-                std::cout << std::bitset<16>(*osn) << std::endl;
             }
 
             jitterbuffer &buff = frame_cache.get(pkgTs);
 
             if (codec == MyApp::VP9CODEC) {
-                frame = buff.addVp9Packet(msg, track_info.lastCompletedSeqNum);
+                frame = buff.addVp9Packet(msg, track_info.lastCompletedTs);
             } else if (codec == MyApp::VP8CODEC) {
-                frame = buff.addVp8Packet(msg, track_info.lastCompletedSeqNum);
+                frame = buff.addVp8Packet(msg, track_info.lastCompletedTs);
             }
 
             if (frame.size() > 0) {
                 track_info.frame_queue[pkgTs].second = frame;
-                track_info.lastCompletedTs = pkgTs;
             }
         } catch (std::exception &e) {
             std::cout << e.what() << std::endl;
@@ -289,6 +294,7 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
 
         if (!track_info.frame_queue.empty()) {
             auto it = track_info.frame_queue.begin();
+
             auto &[rtpTs, dataPair] = *it;
             auto &[creationTs, frame] = dataPair;
 
@@ -298,50 +304,79 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             }
             auto &jitterbuffer = track_info.buff->get(rtpTs);
 
-            auto requestCounter = 999; // just some arbitrary big number
+            auto requestCounter = 999; //  just some arbitrary big number
 
             if (!frame.empty()) {
                 this->player->play(frame, mid, codec, true);
+
+                track_info.lastCompletedTs = rtpTs;
                 track_info.frame_queue.erase(it);
             } else if (nowTs - creationTs > NACK_TIMEOUT_MS * (jitterbuffer.nackRequested + 1)) {
-                requestCounter = jitterbuffer.nackRequested;
-                if (requestCounter > NACK_MAX_TRIES) {
-                    track_info.frame_queue.erase(it);
-                    return;
-                }
-
-                auto nacks = jitterbuffer.getPacketsToNack();
-                if (nacks.size() == 0) {
-                    jitterbuffer.nackRequested++;
-                    return;
-                }
-
-                auto header = rtc::RtcpFbHeader{};
-                header.setMediaSourceSSRC(track_info.ssrc);
-                header.setPacketSenderSSRC(track_info.ssrc);
-                std::cout << "Ts:" << nowTs - creationTs << "\nseqNumber: " << nacks[0].pid()
-                          << "\n"
-                          << std::bitset<16>(nacks[0].pid()) << std::endl;
-                header.header.prepareHeader(205, 1, 2 + uint16_t(nacks.size()));
-                header.header._first |= (std::uint8_t) 0b00000001;
-
-                const auto *headerPtr = reinterpret_cast<const std::byte *>(&header);
-
-                std::vector<std::byte> msg;
-                msg.insert(msg.end(), headerPtr, headerPtr + sizeof(header));
-
-                const std::byte *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
-                const int dataSize = nacks.size() * sizeof(rtc::RtcpNackPart);
-                msg.insert(msg.end(), dataPtr, dataPtr + dataSize);
-
-                auto track = track_info.track.lock();
-                std::cout << "sent: " << msg.size() << " bytes" << "\nconsisting of: " << dataSize
-                          << " data bytes" << "\nand " << sizeof(header) << " header bytes"
-                          << std::endl;
-                track->send(msg.data(), msg.size());
-                jitterbuffer.nackRequested++;
+                this->enforceNackPolicy(mid);
             }
-        }
-       
+        }      
     };
+}
+
+void ConferenceClient::enforceNackPolicy(std::string mid)
+{
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    auto nowTs = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+    auto &track_info = this->track_index[mid];
+
+    auto it = track_info.frame_queue.begin();
+    auto &[rtpTs, dataPair] = *it;
+    auto &[creationTs, frame] = dataPair;
+
+    if (nowTs - creationTs <= NACK_TIMEOUT_MS) {
+        return;
+    }
+
+    if (!track_info.buff->exist(rtpTs)) {
+        track_info.frame_queue.erase(it);
+        return;
+    }
+
+    auto &jitterbuffer = track_info.buff->get(rtpTs);
+
+    auto requestCounter = 999; // just some arbitrary big number
+
+    requestCounter = jitterbuffer.nackRequested;
+    if (requestCounter > NACK_MAX_TRIES) {
+        track_info.frame_queue.erase(it);
+        return;
+    }
+
+    if (nowTs - creationTs <= NACK_TIMEOUT_MS * requestCounter) {
+        return;
+    }
+
+    auto nacks = jitterbuffer.getPacketsToNack();
+    jitterbuffer.nackRequested++;
+    if (nacks.size() == 0) {
+        jitterbuffer.nackRequested++;
+        return;
+    }
+
+    auto header = rtc::RtcpFbHeader{};
+    header.setMediaSourceSSRC(track_info.ssrc);
+    header.setPacketSenderSSRC(track_info.ssrc);
+    std::cout << "Ts:" << nowTs - creationTs << "\nseqNumber: " << nacks[0].pid() << std::endl;
+    header.header.prepareHeader(205, 1, 2 + uint16_t(nacks.size()));
+    header.header._first |= (std::uint8_t) 0b00000001;
+
+    const auto *headerPtr = reinterpret_cast<const std::byte *>(&header);
+
+    std::vector<std::byte> msg;
+    msg.insert(msg.end(), headerPtr, headerPtr + sizeof(header));
+
+    const std::byte *dataPtr = reinterpret_cast<const std::byte *>(nacks.data());
+    const int dataSize = nacks.size() * sizeof(rtc::RtcpNackPart);
+    msg.insert(msg.end(), dataPtr, dataPtr + dataSize);
+
+    auto track = track_info.track.lock();
+    track->send(msg.data(), msg.size());
+
+    return;
 }

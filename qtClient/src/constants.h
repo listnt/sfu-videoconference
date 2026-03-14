@@ -9,6 +9,7 @@ namespace MyApp {
 const std::string AppName = "stupid_shit";
 const std::string VP8CODEC = "VP8";
 const std::string VP9CODEC = "VP9";
+const std::string Rtx = "rtx";
 const std::string OpusCodec = "opus";
 } // namespace MyApp
 
