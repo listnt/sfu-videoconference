@@ -24,6 +24,8 @@ struct track_ptr {
     std::weak_ptr<rtc::Track> track;
     std::uint32_t ssrc = 0;
     std::string codec = "NO_CODEC";
+    std::uint8_t codecPT = 0;
+
     // for video only
     std::uint32_t lastCompletedTs = 0;
     std::optional<LRUCache<std::int32_t, jitterbuffer>> buff;
