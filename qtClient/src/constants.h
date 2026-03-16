@@ -1,7 +1,7 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
-#define NACK_TIMEOUT_MS 50
-#define NACK_MAX_TRIES 3
+#define NACK_TIMEOUT_MS 30
+#define NACK_MAX_TRIES 10
 
 #include <string>
 

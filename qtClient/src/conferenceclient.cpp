@@ -259,6 +259,8 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 rtpHeader->_seqNumber = ((uint8_t) *(osnPos)) | ((uint8_t) (*(osnPos + 1)) << 8);
                 rtpHeader->_payloadType = codecPT;
 
+                std::cout << "rtx packet came: " << rtpHeader->seqNumber() << std::endl;
+
                 msg.erase(osnPos, osnPos + 2);
             }
 
@@ -286,7 +288,7 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 track_info.frame_queue[pkgTs].second = frame;
             }
         } catch (std::exception &e) {
-            std::cout << e.what() << std::endl;
+            //std::cout << e.what() << std::endl;
             return;
         }
 
@@ -321,46 +323,43 @@ void ConferenceClient::enforceNackPolicy(std::string mid)
     auto nowTs = std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
     auto &track_info = this->track_index[mid];
 
-    auto it = track_info.frame_queue.begin();
-    auto &[rtpTs, dataPair] = *it;
-
     std::vector<rtc::RtcpNackPart> nacks;
     std::vector<std::byte> nackMsg;
 
-    for (it = track_info.frame_queue.begin(); it != track_info.frame_queue.end(); it++) {
+    auto it = track_info.frame_queue.begin();
+    while (it != track_info.frame_queue.end()) {
+        auto &[rtpTs, dataPair] = *it;
         auto &[creationTs, frame] = dataPair;
 
-        if (nowTs - creationTs <= NACK_TIMEOUT_MS) {
-            break;
-        }
-
         if (!track_info.buff->exist(rtpTs)) {
-            track_info.frame_queue.erase(it);
-            break;
+            it = track_info.frame_queue.erase(it);
+            continue;
         }
 
         auto &jitterbuffer = track_info.buff->get(rtpTs);
-
-        auto requestCounter = 999; // just some arbitrary big number
-
-        requestCounter = jitterbuffer.nackRequested;
-        if (requestCounter > NACK_MAX_TRIES) {
-            track_info.frame_queue.erase(it);
-            break;
-        }
-
-        if (nowTs - creationTs <= NACK_TIMEOUT_MS * requestCounter) {
-            break;
+        if (nowTs - creationTs <= NACK_TIMEOUT_MS * (jitterbuffer.nackRequested + 1)) {
+            it++;
+            continue;
         }
 
         auto frameNacks = jitterbuffer.getPacketsToNack();
-        jitterbuffer.nackRequested++;
         if (frameNacks.size() == 0) {
-            jitterbuffer.nackRequested++;
+            it++;
+            continue;
+        }
+        jitterbuffer.nackRequested++;
+
+        if (jitterbuffer.nackRequested > NACK_MAX_TRIES) {
+            std::cout << "deleted frame[too much retries]: " << it->first << std::endl;
+            std::cout << "time diff: " << nowTs - it->second.first << std::endl;
+
+            it = track_info.frame_queue.erase(it);
             continue;
         }
 
         nacks.insert(nacks.end(), frameNacks.begin(), frameNacks.end());
+
+        it++;
     }
 
     if (nacks.size() == 0) {
@@ -382,6 +381,7 @@ void ConferenceClient::enforceNackPolicy(std::string mid)
     nackMsg.insert(nackMsg.end(), dataPtr, dataPtr + dataSize);
 
     auto track = track_info.track.lock();
+
     track->send(nackMsg.data(), nackMsg.size());
 
     return;

@@ -8,6 +8,7 @@ import (
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -41,7 +42,10 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 	mediaEngine.RegisterDefaultCodecs()
 	interseporRegistry := interceptor.Registry{}
 
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, &interseporRegistry); err != nil {
+	if err := webrtc.RegisterDefaultInterceptorsWithOptions(mediaEngine, &interseporRegistry,
+		webrtc.WithNackGeneratorOptions(nack.GeneratorSize(2048)),
+		webrtc.WithNackResponderOptions(nack.ResponderSize(2048)),
+	); err != nil {
 		logger.Error("failed to register interceptor", zap.Error(err))
 
 		panic(err)
