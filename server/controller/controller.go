@@ -43,8 +43,8 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 	interseporRegistry := interceptor.Registry{}
 
 	if err := webrtc.RegisterDefaultInterceptorsWithOptions(mediaEngine, &interseporRegistry,
-		webrtc.WithNackGeneratorOptions(nack.GeneratorSize(2048)),
-		webrtc.WithNackResponderOptions(nack.ResponderSize(2048)),
+		webrtc.WithNackGeneratorOptions(nack.GeneratorSize(8192)),
+		webrtc.WithNackResponderOptions(nack.ResponderSize(8192)),
 	); err != nil {
 		logger.Error("failed to register interceptor", zap.Error(err))
 
@@ -405,13 +405,25 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			}
 
 			go func() {
-				_, _, err := t.Sender().ReadRTCP()
+				var pkt []rtcp.Packet
+
+				pkt, _, err := t.Sender().ReadRTCP()
 				if err != nil {
 					ctrl.logger.Error("failed to read RTCP", zap.Error(err))
 					return
 				}
 
 				ctrl.dispatch(room)
+
+				for {
+					ctrl.logger.Info("recieved rtcp", zap.Any("pkt", pkt))
+
+					pkt, _, err = t.Sender().ReadRTCP()
+					if err != nil {
+						ctrl.logger.Error("failed to read RTCP", zap.Error(err))
+						return
+					}
+				}
 			}()
 		}
 

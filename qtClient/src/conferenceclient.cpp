@@ -315,9 +315,9 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
                 track_info.lastCompletedTs = rtpTs;
 
                 track_info.frame_queue.erase(it);
-            } else if (nowTs - creationTs > NACK_TIMEOUT_MS * (jitterbuffer.nackRequested + 1)) {
-                this->enforceNackPolicy(mid);
             }
+
+            this->enforceNackPolicy(mid);
         }      
     };
 }
@@ -360,6 +360,7 @@ void ConferenceClient::enforceNackPolicy(std::string mid)
         jitterbuffer.nackRequested++;
 
         if (jitterbuffer.nackRequested > NACK_MAX_TRIES) {
+            std::cout << "deleted frame[too much retries]: " << frameNacks[0].pid() << std::endl;
             it = track_info.frame_queue.erase(it);
             continue;
         }
