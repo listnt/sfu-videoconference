@@ -28,7 +28,7 @@ struct track_ptr {
 
     // for video only
     std::uint32_t lastCompletedTs = 0;
-    std::optional<LRUCache<std::int32_t, jitterbuffer>> buff;
+    std::optional<LRUCache<std::uint32_t, jitterbuffer>> buff;
     std::map<std::uint32_t, std::pair<long, std::vector<std::byte>>> frame_queue;
 };
 

@@ -184,8 +184,6 @@ void videoPlayer::decode(std::string mid, bool isVideo)
           int samplesPerChannel = dec.frame->nb_samples;
           int bytesPerSample = av_get_bytes_per_sample((AVSampleFormat) dec.frame->format);
 
-          // std::cout << dec.frame->format << std::endl;
-
           if (!av_sample_fmt_is_planar((AVSampleFormat) dec.frame->format)) {
               this->audioDevice[mid]->write((const char *) dec.frame->data[0],
                                             samplesPerChannel * channels * bytesPerSample);

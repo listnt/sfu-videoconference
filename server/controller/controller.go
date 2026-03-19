@@ -8,6 +8,7 @@ import (
 	"github.com/listnt/videoconference/common"
 	"github.com/listnt/videoconference/repository"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
@@ -41,7 +42,10 @@ func NewController(logger *zap.Logger, roomRepo repository.RoomRepo) Controller 
 	mediaEngine.RegisterDefaultCodecs()
 	interseporRegistry := interceptor.Registry{}
 
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, &interseporRegistry); err != nil {
+	if err := webrtc.RegisterDefaultInterceptorsWithOptions(mediaEngine, &interseporRegistry,
+		webrtc.WithNackGeneratorOptions(nack.GeneratorSize(2048)),
+		webrtc.WithNackResponderOptions(nack.ResponderSize(2048)),
+	); err != nil {
 		logger.Error("failed to register interceptor", zap.Error(err))
 
 		panic(err)
@@ -401,25 +405,13 @@ func (ctrl *controller) signalRoom(peer *common.Peer, room string) {
 			}
 
 			go func() {
-				var pkt []rtcp.Packet
-
-				pkt, _, err := t.Sender().ReadRTCP()
+				_, _, err := t.Sender().ReadRTCP()
 				if err != nil {
 					ctrl.logger.Error("failed to read RTCP", zap.Error(err))
 					return
 				}
 
 				ctrl.dispatch(room)
-
-				for {
-					ctrl.logger.Info("recieved rtcp", zap.Any("pkt", pkt))
-
-					pkt, _, err = t.Sender().ReadRTCP()
-					if err != nil {
-						ctrl.logger.Error("failed to read RTCP", zap.Error(err))
-						return
-					}
-				}
 			}()
 		}
 
