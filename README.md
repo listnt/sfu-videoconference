@@ -11,7 +11,7 @@ A high-performance, WebRTC-based videoconferencing system focused on low-level m
 # Roadmap
 * [✓] Add jitterbuffer for OOO packets
 * [✓/x] Add VP9 depaketizer. (implemented only in jitterbuffer)
-* [] Add Nack Acknowledgement
+* [✓] Add Nack Acknowledgement
 * [] Add AV1 depaketizer
 * [] Make properly looking native client
 * [] Make properly looking web client
