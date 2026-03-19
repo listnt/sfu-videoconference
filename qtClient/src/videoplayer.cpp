@@ -137,7 +137,7 @@ void videoPlayer::decode(std::string mid, bool isVideo)
     if (ret < 0) {
         char errbuf[256];
         av_strerror(ret, errbuf, sizeof(errbuf));
-        // std::cout << "error occured: " << ret << " " << errbuf << std::endl;
+        std::cout << "error occured: " << ret << " " << errbuf << std::endl;
     }
   while (ret >= 0) {
       ret = avcodec_receive_frame(dec.c, dec.frame);
@@ -183,8 +183,6 @@ void videoPlayer::decode(std::string mid, bool isVideo)
           int channels = dec.c->channels;
           int samplesPerChannel = dec.frame->nb_samples;
           int bytesPerSample = av_get_bytes_per_sample((AVSampleFormat) dec.frame->format);
-
-          // std::cout << dec.frame->format << std::endl;
 
           if (!av_sample_fmt_is_planar((AVSampleFormat) dec.frame->format)) {
               this->audioDevice[mid]->write((const char *) dec.frame->data[0],

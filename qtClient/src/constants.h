@@ -1,6 +1,7 @@
 #ifndef CONSTANTS_H
 #define CONSTANTS_H
-#define NACK_TIMEOUT_MS 30
+#define PLAYER_DELAY 100
+#define NACK_TIMEOUT_MS 70
 #define NACK_MAX_TRIES 10
 
 #include <string>
