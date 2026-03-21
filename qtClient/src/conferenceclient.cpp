@@ -246,9 +246,6 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             auto msg = std::get<rtc::binary>(message);
             auto rtpHeader = reinterpret_cast<rtc::RtpHeader *>(msg.data());
 
-            bool isRtx = false;
-            bool isVideo = false;
-
             std::uint32_t pkgTs = rtpHeader->timestamp();
             if (pkgTs < track_info.lastCompletedTs) {
                 return;
@@ -261,7 +258,6 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
 
                 rtpHeader->_seqNumber = ((uint8_t) *(osnPos)) | ((uint8_t) (*(osnPos + 1)) << 8);
                 rtpHeader->_payloadType = codecPT;
-                isRtx = true;
 
                 msg.erase(osnPos, osnPos + 2);
             }
@@ -284,13 +280,13 @@ std::function<void(rtc::message_variant)> ConferenceClient::pcOnMessage(std::str
             jitterbuffer &buff = frame_cache.get(pkgTs);
 
             if (codec == MyApp::VP9CODEC) {
-                frame = buff.addVp9Packet(msg, track_info.lastCompletedTs);
+                frame = buff.addVp9Packet(std::move(msg), track_info.lastCompletedTs);
             } else if (codec == MyApp::VP8CODEC) {
-                frame = buff.addVp8Packet(msg, track_info.lastCompletedTs);
+                frame = buff.addVp8Packet(std::move(msg), track_info.lastCompletedTs);
             }
 
             if (frame.size() > 0) {
-                track_info.frame_queue[pkgTs].second = frame;
+                track_info.frame_queue[pkgTs].second = std::move(frame);
             }
         } catch (std::exception &e) {
             // std::cout << e.what() << std::endl;

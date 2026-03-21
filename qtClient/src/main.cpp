@@ -29,12 +29,6 @@ void initWebRtcClient(QGuiApplication &app, QQmlApplicationEngine &engine) {
 
 int main(int argc, char *argv[])
 {
-    std::uint16_t a = 0;
-    std::uint16_t b = 0xffff;
-    std::uint16_t c = 1;
-    a = c - b;
-    std::cout << a << std::endl;
-
     QGuiApplication app(argc, argv);
 
     QQmlApplicationEngine engine;
